@@ -1,0 +1,109 @@
+name: Publish NuGet packages
+
+on:
+  release:
+    types: [published]
+
+concurrency:
+  group: nuget-release-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "true"
+  PACKAGE_OUTPUT: artifacts/nuget
+
+jobs:
+  publish:
+    name: Test, pack, and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Check out the released source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5.2.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Validate release version
+        id: version
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version="${RELEASE_TAG#v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+            echo "::error::Release tag '$RELEASE_TAG' is not a supported NuGet version. Use v1.2.3 or v1.2.3-beta.1."
+            exit 1
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Restore
+        run: dotnet restore Monorepo.sln
+
+      - name: Test
+        run: dotnet test Monorepo.sln --configuration Release --no-restore --nologo --verbosity minimal -p:ContinuousIntegrationBuild=true
+
+      - name: Pack MongoDB library
+        run: >-
+          dotnet pack Mongo/Mongo/Mongo.csproj
+          --configuration Release
+          --no-restore
+          --output "$PACKAGE_OUTPUT"
+          -p:PackageVersion=${{ steps.version.outputs.value }}
+          -p:ContinuousIntegrationBuild=true
+
+      - name: Pack PostgreSQL library
+        run: >-
+          dotnet pack Postgres/Postgres/Postgres.csproj
+          --configuration Release
+          --no-restore
+          --output "$PACKAGE_OUTPUT"
+          -p:PackageVersion=${{ steps.version.outputs.value }}
+          -p:ContinuousIntegrationBuild=true
+
+      - name: Verify package output
+        shell: bash
+        run: |
+          mapfile -t packages < <(find "$PACKAGE_OUTPUT" -maxdepth 1 -type f -name '*.nupkg' | sort)
+          if [[ "${#packages[@]}" -ne 2 ]]; then
+            echo "::error::Expected exactly two NuGet packages, found ${#packages[@]}."
+            printf '%s\n' "${packages[@]}"
+            exit 1
+          fi
+          printf 'Created package: %s\n' "${packages[@]}"
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: nuget-packages-${{ steps.version.outputs.value }}
+          path: |
+            ${{ env.PACKAGE_OUTPUT }}/*.nupkg
+            ${{ env.PACKAGE_OUTPUT }}/*.snupkg
+          if-no-files-found: error
+
+      - name: Log in to NuGet.org with trusted publishing
+        id: login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
+      - name: Publish packages to NuGet.org
+        shell: bash
+        run: |
+          for package in "$PACKAGE_OUTPUT"/*.nupkg; do
+            dotnet nuget push "$package" \
+              --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
+              --source "https://api.nuget.org/v3/index.json" \
+              --skip-duplicate
+          done

@@ -3,22 +3,32 @@
   <PropertyGroup>
     <AssemblyName>Mongo</AssemblyName>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
     <OutputType>Library</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>annotations</Nullable>
-    <PackageId>Mongo</PackageId>
+    <PackageId>Devspace.Repositories.MongoDB</PackageId>
     <Authors>Devspace</Authors>
     <Company>Devspace</Company>
-    <Description>Devspace Mongo</Description>
+    <Description>Generic MongoDB repository with filtering, paging, soft deletion, and index management.</Description>
     <Copyright>@2026 - Devspace</Copyright>
+    <PackageTags>mongodb;repository;database;nosql</PackageTags>
+    <PackageProjectUrl>https://github.com/GVLTodorov/Devspace.Monorepo</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/GVLTodorov/Devspace.Monorepo.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <IsPackable>true</IsPackable>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="MongoDB.Bson" Version="3.10.0" />
     <PackageReference Include="MongoDB.Driver" Version="3.10.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
 </Project>
