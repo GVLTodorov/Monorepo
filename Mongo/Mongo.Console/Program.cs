@@ -26,12 +26,12 @@ public static class Program
             DatabaseName);
 
         ShowMetadata();
-        await DemonstrateIndexesAsync(repository);
+        await CreateIndexesAsync(repository);
 
         var entities = CreateEntities();
-        await DemonstrateCreateAndReadAsync(repository, entities);
-        await DemonstrateUpdatesAndPullsAsync(repository, entities);
-        await DemonstrateDeletesAndRestoreAsync(repository, entities);
+        await CreateAndReadAsync(repository, entities);
+        await UpdateAndPullAsync(repository, entities);
+        await DeleteAndRestoreAsync(repository, entities);
         await RemoveIndexesAsync(repository);
 
         Section("COMPLETE");
@@ -52,7 +52,7 @@ public static class Program
         System.Console.WriteLine("SensitiveDataAttribute is metadata; applications remain responsible for protection.");
     }
 
-    private static async Task DemonstrateIndexesAsync(MongoRepository<ExampleEntity> repository)
+    private static async Task CreateIndexesAsync(MongoRepository<ExampleEntity> repository)
     {
         Section("INDEX MANAGEMENT");
 
@@ -84,7 +84,7 @@ public static class Program
         Check(true, "Created a compound index with per-field sort directions");
     }
 
-    private static async Task DemonstrateCreateAndReadAsync(
+    private static async Task CreateAndReadAsync(
         MongoRepository<ExampleEntity> repository,
         List<ExampleEntity> entities)
     {
@@ -162,7 +162,7 @@ public static class Program
         Check(multiSortedPage.Items.Count == 4, "Multi-field pagination accepts SortExpression values");
     }
 
-    private static async Task DemonstrateUpdatesAndPullsAsync(
+    private static async Task UpdateAndPullAsync(
         MongoRepository<ExampleEntity> repository,
         List<ExampleEntity> entities)
     {
@@ -204,7 +204,7 @@ public static class Program
         Check(afterPredicatePull.All(entity => !entity.Tags.Contains("temporary")), "Typed PullAsync removes values matching a predicate");
     }
 
-    private static async Task DemonstrateDeletesAndRestoreAsync(
+    private static async Task DeleteAndRestoreAsync(
         MongoRepository<ExampleEntity> repository,
         List<ExampleEntity> entities)
     {

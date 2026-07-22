@@ -1,42 +1,57 @@
 using System.Linq.Expressions;
-using Postgres.Helpers;
-using Testcontainers.PostgreSql;
-using SortDirection = Postgres.Helpers.SortDirection;
+using Microsoft.Data.Sqlite;
+using Sqlite.Helpers;
+using SortDirection = Sqlite.Helpers.SortDirection;
 
-namespace Postgres.Console;
+namespace Sqlite.Console;
 
 public static class Program
 {
     public static async Task Main()
     {
-        Banner("PostgreSQL repository feature demonstration");
-        System.Console.WriteLine("Starting an ephemeral PostgreSQL database with Testcontainers...");
+        Banner("SQLite repository feature demonstration");
+        System.Console.WriteLine("Creating an ephemeral SQLite database file (no Docker or server required)...");
 
-        await using var postgres = new PostgreSqlBuilder("postgres:15.1").Build();
-        await postgres.StartAsync();
+        var databasePath = Path.Combine(Path.GetTempPath(), $"sqlite-repository-demo-{Guid.NewGuid():N}.db");
 
-        var repository = new PostgresRepository<ExampleEntity>(postgres.GetConnectionString());
+        try
+        {
+            // The context is disposed before the database file is deleted; a repository
+            // built from a bare connection string would keep the file locked here.
+            await using (var context = new SqliteDbContext<ExampleEntity>($"Data Source={databasePath}"))
+            {
+                var repository = new SqliteRepository<ExampleEntity>(context);
 
-        ShowMetadata();
-        await TableLifecycleAsync(repository);
-        await CreateIndexesAsync(repository);
+                ShowMetadata();
+                await TableLifecycleAsync(repository);
+                await CreateIndexesAsync(repository);
 
-        var entities = CreateEntities();
-        await CreateAndReadAsync(repository, entities);
-        await UpdateAndPullAsync(repository, entities);
-        await DeleteAndRestoreAsync(repository, entities);
-        await RemoveIndexesAsync(repository);
+                var entities = CreateEntities();
+                await CreateAndReadAsync(repository, entities);
+                await UpdateAndPullAsync(repository, entities);
+                await DeleteAndRestoreAsync(repository, entities);
+                await RemoveIndexesAsync(repository);
+            }
 
-        Section("COMPLETE");
-        System.Console.WriteLine("Every public PostgreSQL repository feature has been demonstrated successfully.");
-        System.Console.WriteLine("The container and all demonstration data will now be removed.");
+            Section("COMPLETE");
+            System.Console.WriteLine("Every public SQLite repository feature has been demonstrated successfully.");
+            System.Console.WriteLine("The database file and all demonstration data will now be removed.");
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (File.Exists(databasePath))
+            {
+                File.Delete(databasePath);
+            }
+        }
     }
 
     private static void ShowMetadata()
     {
         Section("ENTITY METADATA");
 
-        var tableName = PostgresEntityExtensions.GetTableName<ExampleEntity>();
+        var tableName = SqliteEntityExtensions.GetTableName<ExampleEntity>();
         var sensitiveProperty = typeof(ExampleEntity).GetProperty(nameof(ExampleEntity.SecretNote));
         var hasSensitiveMarker = sensitiveProperty?.IsDefined(typeof(SensitiveDataAttribute), false) == true;
 
@@ -45,20 +60,20 @@ public static class Program
         System.Console.WriteLine("SensitiveDataAttribute is metadata; applications remain responsible for protection.");
     }
 
-    private static async Task TableLifecycleAsync(PostgresRepository<ExampleEntity> repository)
+    private static async Task TableLifecycleAsync(SqliteRepository<ExampleEntity> repository)
     {
         Section("TABLE LIFECYCLE");
 
         await repository.EnsureTableAsync();
         Check(await repository.TableExistsAsync(), "EnsureTableAsync creates the mapped table when needed");
-        Check(await repository.TableExistsAsync("feature_examples"), "TableExistsAsync(name) finds the table in the current schema");
-        Check(await repository.TableExistsAsync("feature_examples", "public"), "TableExistsAsync(name, schema) supports explicit schemas");
+        Check(await repository.TableExistsAsync("feature_examples"), "TableExistsAsync(name) finds the table in sqlite_master");
+        Check(await repository.TableExistsAsync("FEATURE_EXAMPLES", "ignored"), "Name comparison is case-insensitive; the schema argument is reserved and ignored");
 
         await repository.TruncateTableAsync(restartIdentity: true, cascade: false);
-        Check(await repository.CountAsync(_ => true) == 0, "TruncateTableAsync resets the demonstration table");
+        Check(await repository.CountAsync(_ => true) == 0, "TruncateTableAsync resets the demonstration table via unfiltered DELETE");
     }
 
-    private static async Task CreateIndexesAsync(PostgresRepository<ExampleEntity> repository)
+    private static async Task CreateIndexesAsync(SqliteRepository<ExampleEntity> repository)
     {
         Section("INDEX MANAGEMENT");
 
@@ -66,7 +81,7 @@ public static class Program
         Check(true, "Created a simple ascending index");
 
         await repository.CreateIndexAsync(entity => entity.ExpiresAtUtc, TimeSpan.FromDays(7));
-        Check(true, "TTL overload created a standard PostgreSQL index (expiry requires a cleanup job)");
+        Check(true, "TTL overload created a standard SQLite index (expiry requires a cleanup job)");
 
         Expression<Func<ExampleEntity, object>>[] compoundFields =
         [
@@ -91,7 +106,7 @@ public static class Program
     }
 
     private static async Task CreateAndReadAsync(
-        PostgresRepository<ExampleEntity> repository,
+        SqliteRepository<ExampleEntity> repository,
         IReadOnlyList<ExampleEntity> entities)
     {
         Section("CREATE");
@@ -111,10 +126,10 @@ public static class Program
             predicate: entity => entity.Category == "Greeting",
             orderBy: entity => entity.Score,
             sortDirection: SortDirection.Descending);
-        Check(first?.ExternalId == "postgres-002", "GetFirstOrDefaultAsync applies filtering and ordering");
+        Check(first?.ExternalId == "sqlite-002", "GetFirstOrDefaultAsync applies filtering and ordering");
 
         var single = await repository.GetSingleOrDefaultAsync(
-            entity => entity.ExternalId == "postgres-003");
+            entity => entity.ExternalId == "sqlite-003");
         Check(single?.TestField == "Planner", "GetSingleOrDefaultAsync returns the unique match");
 
         var sorted = await repository.GetAllAsync(
@@ -132,7 +147,7 @@ public static class Program
             predicate: entity => entity.Category == "Greeting");
         Check(summaries.Count == 3, "Projection returns only the requested columns");
 
-        Check(await repository.ExistsAsync(entity => entity.ExternalId == "postgres-004"), "ExistsAsync finds an active row");
+        Check(await repository.ExistsAsync(entity => entity.ExternalId == "sqlite-004"), "ExistsAsync finds an active row");
 
         Section("PAGINATION");
 
@@ -168,7 +183,7 @@ public static class Program
     }
 
     private static async Task UpdateAndPullAsync(
-        PostgresRepository<ExampleEntity> repository,
+        SqliteRepository<ExampleEntity> repository,
         IReadOnlyList<ExampleEntity> entities)
     {
         Section("UPDATE");
@@ -203,7 +218,7 @@ public static class Program
     }
 
     private static async Task DeleteAndRestoreAsync(
-        PostgresRepository<ExampleEntity> repository,
+        SqliteRepository<ExampleEntity> repository,
         IReadOnlyList<ExampleEntity> entities)
     {
         Section("SOFT DELETE AND RESTORE");
@@ -223,12 +238,12 @@ public static class Program
         await repository.RestoreAsync(entities[1]);
         Check(await repository.ExistsAsync(entity => entity.Id == entities[1].Id), "DeleteAsync and RestoreAsync(entity) complete the entity workflow");
 
-        await repository.DeleteOneAsync(entity => entity.ExternalId == "postgres-004");
-        Check(!await repository.ExistsAsync(entity => entity.ExternalId == "postgres-004"), "DeleteOneAsync soft-deletes the first predicate match");
-        await repository.DeleteOneAsync(entity => entity.ExternalId == "postgres-004", hardDelete: true);
+        await repository.DeleteOneAsync(entity => entity.ExternalId == "sqlite-004");
+        Check(!await repository.ExistsAsync(entity => entity.ExternalId == "sqlite-004"), "DeleteOneAsync soft-deletes the first predicate match");
+        await repository.DeleteOneAsync(entity => entity.ExternalId == "sqlite-004", hardDelete: true);
 
         var deletedMany = await repository.DeleteManyAsync(
-            entity => entity.ExternalId.StartsWith("postgres-delete-many"));
+            entity => entity.ExternalId.StartsWith("sqlite-delete-many"));
         Check(deletedMany.Count == 2 && deletedMany.All(entity => entity.IsDeleted), "DeleteManyAsync(predicate) transactionally soft-deletes matching rows");
 
         foreach (var entity in deletedMany)
@@ -237,7 +252,7 @@ public static class Program
         }
 
         await repository.DeleteManyAsync(deletedMany, hardDelete: true);
-        Check(await repository.CountAsync(entity => entity.ExternalId.StartsWith("postgres-delete-many")) == 0, "DeleteManyAsync(collection) permanently removes selected rows");
+        Check(await repository.CountAsync(entity => entity.ExternalId.StartsWith("sqlite-delete-many")) == 0, "DeleteManyAsync(collection) permanently removes selected rows");
 
         Section("HARD DELETE");
 
@@ -246,7 +261,7 @@ public static class Program
         Check(await repository.CountAsync(entity => entity.Id == entities[0].Id || entity.Id == entities[2].Id) == 0, "DeleteAsync and DeleteByIdAsync support permanent deletion");
     }
 
-    private static async Task RemoveIndexesAsync(PostgresRepository<ExampleEntity> repository)
+    private static async Task RemoveIndexesAsync(SqliteRepository<ExampleEntity> repository)
     {
         Section("INDEX CLEANUP");
 
@@ -275,12 +290,12 @@ public static class Program
 
         return
         [
-            NewEntity("postgres-001", "Ada", "Greeting", 80, ["demo", "legacy"], expiry),
-            NewEntity("postgres-002", "Grace", "Greeting", 95, ["demo", "temporary"], expiry),
-            NewEntity("postgres-003", "Planner", "Greeting", 90, ["database", "temporary"], expiry),
-            NewEntity("postgres-004", "Delete one", "Cleanup", 40, ["cleanup"], expiry),
-            NewEntity("postgres-delete-many-001", "Delete many A", "Cleanup", 30, ["cleanup"], expiry),
-            NewEntity("postgres-delete-many-002", "Delete many B", "Cleanup", 20, ["cleanup"], expiry)
+            NewEntity("sqlite-001", "Ada", "Greeting", 80, ["demo", "legacy"], expiry),
+            NewEntity("sqlite-002", "Grace", "Greeting", 95, ["demo", "temporary"], expiry),
+            NewEntity("sqlite-003", "Planner", "Greeting", 90, ["database", "temporary"], expiry),
+            NewEntity("sqlite-004", "Delete one", "Cleanup", 40, ["cleanup"], expiry),
+            NewEntity("sqlite-delete-many-001", "Delete many A", "Cleanup", 30, ["cleanup"], expiry),
+            NewEntity("sqlite-delete-many-002", "Delete many B", "Cleanup", 20, ["cleanup"], expiry)
         ];
     }
 

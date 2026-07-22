@@ -1,8 +1,8 @@
 # Devspace data repositories
 
-Production-oriented repository abstractions for MongoDB and PostgreSQL on .NET 10.
+Production-oriented repository abstractions for MongoDB, PostgreSQL, and SQLite on .NET 10.
 
-This solution provides two strongly typed libraries with intentionally similar workflows for CRUD, bulk operations, audit timestamps, soft deletion, restore, projections, sorting, pagination, collection updates, and index management. Provider-specific behavior remains available where the databases differ.
+This solution provides three strongly typed libraries with intentionally similar workflows for CRUD, bulk operations, audit timestamps, soft deletion, restore, projections, sorting, pagination, collection updates, and index management. Provider-specific behavior remains available where the databases differ.
 
 ## Contents
 
@@ -11,6 +11,7 @@ This solution provides two strongly typed libraries with intentionally similar w
 - [Feature comparison](#feature-comparison)
 - [Mongo library](#mongo-library)
 - [Postgres library](#postgres-library)
+- [Sqlite library](#sqlite-library)
 - [Shared behavior](#shared-behavior)
 - [Console applications](#console-applications)
 - [Testing and coverage](#testing-and-coverage)
@@ -31,43 +32,48 @@ Monorepo/
 |   |-- Postgres/               PostgreSQL repository library
 |   |-- Postgres.Console/       PostgreSQL Testcontainers CRUD demonstration
 |   `-- Postgres.Tests/         NUnit unit and provider-level tests
+|-- Sqlite/
+|   |-- Sqlite/                 SQLite repository library
+|   |-- Sqlite.Console/         SQLite embedded CRUD demonstration (no Docker)
+|   `-- Sqlite.Tests/           NUnit unit and provider-level tests
 |-- Monorepo.sln
 `-- README.md
 ```
 
-All six projects target `net10.0`. The two library projects are packable and generate XML API documentation.
+All nine projects target `net10.0`. The three library projects are packable and generate XML API documentation.
 
 ## Choose a database
 
-| Choose MongoDB when | Choose PostgreSQL when |
-|---|---|
-| Documents have flexible or evolving shapes | The domain benefits from a strongly defined relational schema |
-| Nested objects and arrays are central to the model | Foreign keys, constraints, and relational integrity are important |
-| Native document TTL indexes are required | Multi-row ACID transactions are a primary requirement |
-| The workload naturally maps to document access patterns | SQL reporting, joins, and established relational tooling matter |
-| Horizontal document distribution is expected | Complex relational querying and EF Core integration are preferred |
+| Choose MongoDB when | Choose PostgreSQL when | Choose SQLite when |
+|---|---|---|
+| Documents have flexible or evolving shapes | The domain benefits from a strongly defined relational schema | The application needs an embedded, zero-configuration store |
+| Nested objects and arrays are central to the model | Foreign keys, constraints, and relational integrity are important | Desktop, mobile, CLI, or offline-first workloads dominate |
+| Native document TTL indexes are required | Multi-row ACID transactions are a primary requirement | A single writer with in-process access is sufficient |
+| The workload naturally maps to document access patterns | SQL reporting, joins, and established relational tooling matter | Local caches, prototypes, and tests should run without a server |
+| Horizontal document distribution is expected | Complex relational querying and EF Core integration are preferred | Deployment must avoid external database infrastructure |
 
 The repository APIs reduce application-level differences, but they do not make the databases interchangeable. Schema design, indexing, transaction behavior, query translation, and deployment topology must still be designed for the selected provider.
 
 ## Feature comparison
 
-| Capability | Mongo | Postgres |
-|---|---:|---:|
-| Strongly typed predicates | Yes | Yes, translated by EF Core |
-| Single and bulk insert | Yes | Yes |
-| Single and bulk update | Yes | Yes |
-| Soft and hard delete | Yes | Yes |
-| Restore soft-deleted records | Yes | Yes |
-| Projection | MongoDB `ProjectionDefinition` | LINQ expression |
-| One- and multi-column sorting | Yes | Yes |
-| Pagination metadata | Yes | Yes |
-| Collection item removal | Native MongoDB pull operation | EF Core read/modify/write |
-| Simple, compound, directional, and unique indexes | Yes | Yes |
-| Partial indexes | Yes | Not implemented; the current filter argument is reserved |
-| TTL indexes | Native | Not native; the TTL overload creates a normal index |
-| Automatic storage creation | MongoDB creates collections on first write | Repository can ensure the mapped table exists |
-| Table truncation | Not applicable | Yes, with identity restart and cascade options |
-| Provider-level transactions for bulk mutation | Requires a transaction-capable MongoDB deployment | Relational EF Core transaction |
+| Capability | Mongo | Postgres | Sqlite |
+|---|---:|---:|---:|
+| Strongly typed predicates | Yes | Yes, translated by EF Core | Yes, translated by EF Core |
+| Single and bulk insert | Yes | Yes | Yes |
+| Single and bulk update | Yes | Yes | Yes |
+| Soft and hard delete | Yes | Yes | Yes |
+| Restore soft-deleted records | Yes | Yes | Yes |
+| Projection | MongoDB `ProjectionDefinition` | LINQ expression | LINQ expression |
+| One- and multi-column sorting | Yes | Yes | Yes |
+| Pagination metadata | Yes | Yes | Yes |
+| Collection item removal | Native MongoDB pull operation | EF Core read/modify/write | EF Core read/modify/write |
+| Simple, compound, directional, and unique indexes | Yes | Yes | Yes |
+| Partial indexes | Yes | Not implemented; the current filter argument is reserved | Not implemented; the current filter argument is reserved |
+| TTL indexes | Native | Not native; the TTL overload creates a normal index | Not native; the TTL overload creates a normal index |
+| Automatic storage creation | MongoDB creates collections on first write | Repository can ensure the mapped table exists | Repository can ensure the mapped table exists |
+| Table truncation | Not applicable | Yes, with identity restart and cascade options | `DELETE`-based reset with `sqlite_sequence` restart; cascade not applicable |
+| Provider-level transactions for bulk mutation | Requires a transaction-capable MongoDB deployment | Relational EF Core transaction | Relational EF Core transaction |
+| External infrastructure | MongoDB deployment | PostgreSQL server | None; embedded file or in-memory database |
 
 ## Mongo library
 
@@ -461,11 +467,128 @@ PostgreSQL has no native MongoDB-style TTL index. The `expiresAfter` overload cr
 
 For a focused provider reference, see [Postgres/README.md](Postgres/README.md).
 
+## Sqlite library
+
+### Specification
+
+| Property | Value |
+|---|---|
+| Project | `Sqlite/Sqlite/Sqlite.csproj` |
+| Assembly and package ID | `Sqlite` |
+| Target framework | `.NET 10` |
+| ORM | `Microsoft.EntityFrameworkCore 10.0.10` |
+| Provider | `Microsoft.EntityFrameworkCore.Sqlite 10.0.10` |
+| Entity contract | `ISqliteEntity` |
+| Base entity | `SqliteEntity` |
+| Repository contract | `ISqliteRepository<T>` |
+| Identifier | Generated GUID represented as a string, maximum mapped length 64 |
+| Default storage name | Entity type converted to `snake_case`, with a trailing `Entity` removed |
+
+### Reference the project
+
+```xml
+<ItemGroup>
+  <ProjectReference Include="..\Sqlite\Sqlite\Sqlite.csproj" />
+</ItemGroup>
+```
+
+### Define an entity
+
+```csharp
+using Sqlite.Helpers;
+
+[TableName("ApplicationUsers")]
+public sealed class UserEntity : SqliteEntity
+{
+    public string Name { get; set; } = string.Empty;
+
+    public string Email { get; set; } = string.Empty;
+
+    public List<string> Roles { get; set; } = [];
+
+    public DateTime LastActiveUtc { get; set; }
+}
+```
+
+The mapped table name is `application_users`. `SqliteEntity` supplies the same audit and soft-delete members as `MongoEntity` and `PostgresEntity`.
+
+### Create a repository
+
+The direct connection-string constructor is convenient for small tools:
+
+```csharp
+using Sqlite;
+
+ISqliteRepository<UserEntity> users =
+    new SqliteRepository<UserEntity>("Data Source=application.db");
+```
+
+For hosted applications, prefer dependency injection and a scoped context:
+
+```csharp
+using Microsoft.EntityFrameworkCore;
+using Sqlite;
+
+services.AddDbContext<SqliteDbContext<UserEntity>>(options =>
+    options.UseSqlite(configuration.GetConnectionString("Sqlite")));
+
+services.AddScoped<ISqliteRepository<UserEntity>, SqliteRepository<UserEntity>>();
+```
+
+`DbContext` is not thread-safe. Use a scoped repository/context per request or unit of work, and never execute concurrent operations through the same instance. Prefer the context-based constructor when the application must release the database file deterministically.
+
+### CRUD, queries, and workflows
+
+The SQLite repository exposes the same API surface as the PostgreSQL repository: `InsertAsync`, `GetByIdAsync`, `ExistsAsync`, `UpdateAsync`, `UpdateManyAsync`, `PullAsync`, `DeleteAsync`/`DeleteByIdAsync`/`DeleteOneAsync`/`DeleteManyAsync`, `RestoreAsync`, `GetAllAsync` (with LINQ projections), `GetPagedListAsync` (single- and multi-field sorting), `CountAsync`, `GetFirstOrDefaultAsync`, and `GetSingleOrDefaultAsync`. All PostgreSQL usage examples above apply verbatim after swapping the `Postgres` types and namespace for `Sqlite`.
+
+### Table and index management
+
+```csharp
+using System.Linq.Expressions;
+
+await users.EnsureTableAsync();
+var exists = await users.TableExistsAsync();
+
+await users.CreateIndexAsync(x => x.Email);
+
+Expression<Func<UserEntity, object>>[] fields =
+[
+    x => x.Email,
+    x => x.Name
+];
+
+await users.CreateIndexAsync(fields, unique: true);
+await users.RemoveIndexAsync(fields);
+
+// Administrative operation: permanently removes every row via unfiltered DELETE.
+await users.TruncateTableAsync(restartIdentity: true);
+```
+
+`TableExistsAsync` queries `sqlite_master`; the optional `schema` argument is reserved for API parity and ignored. SQLite has no `TRUNCATE` statement, so `TruncateTableAsync` issues an unfiltered `DELETE` and, when `restartIdentity` is set, resets the table's `AUTOINCREMENT` counter in `sqlite_sequence`. The `cascade` argument is accepted for API parity but has no effect. Like PostgreSQL, the TTL overload creates a normal index, and the partial-index filter argument is reserved.
+
+### Sqlite advantages
+
+- Zero infrastructure: embedded, serverless, and credential-free.
+- Single-file databases that are trivial to back up, copy, and ship.
+- Familiar EF Core change tracking and LINQ integration.
+- Ideal for tests, demos, desktop or mobile apps, and offline-first workloads.
+- Transaction-backed bulk mutation paths in the repository.
+
+### Sqlite tradeoffs
+
+- Single-writer concurrency; concurrent writes serialize at the database level.
+- No network layer; every consumer needs access to the database file.
+- Truncation is a `DELETE`-based reset, not a constant-time `TRUNCATE`.
+- Collection pulling is less efficient than MongoDB's native array update operator.
+- TTL behavior is not native, and partial-index filter translation is not implemented by this repository.
+
+For a focused provider reference, see [Sqlite/README.md](Sqlite/README.md).
+
 ## Shared behavior
 
 ### Audit fields
 
-Both base entities expose:
+All three base entities expose:
 
 | Property | Behavior |
 |---|---|
@@ -500,7 +623,7 @@ The following operations exclude soft-deleted records unless their `includeDelet
 - `HasNextPage`
 - `Items`
 
-Page indexes are one-based. PostgreSQL validates both `pageIndex` and `pageSize` as positive values. Always supply deterministic ordering when records can share the default creation timestamp.
+Page indexes are one-based. The PostgreSQL and SQLite repositories validate both `pageIndex` and `pageSize` as positive values. Always supply deterministic ordering when records can share the default creation timestamp.
 
 ### Sensitive data marker
 
@@ -508,16 +631,17 @@ Page indexes are one-based. PostgreSQL validates both `pageIndex` and `pageSize`
 
 ## Console applications
 
-The console projects are executable specifications and smoke-test demonstrations. They never contain committed database credentials. Each starts an ephemeral Docker container, obtains its runtime connection string from Testcontainers, performs the demonstration, and removes the container through `await using` when the process exits normally.
+The console projects are executable specifications and smoke-test demonstrations. They never contain committed database credentials. The Mongo and Postgres apps each start an ephemeral Docker container, obtain their runtime connection string from Testcontainers, perform the demonstration, and remove the container through `await using` when the process exits normally. The Sqlite app needs no Docker at all: it creates an ephemeral database file in the system temp directory and deletes it on exit.
 
 ### Requirements
 
-- .NET 10 SDK
-- A Docker-compatible engine
-- Permission to pull images and create containers
-- The Docker endpoint available to Testcontainers
+- .NET 10 SDK (all three apps)
+- For Mongo.Console and Postgres.Console only:
+  - A Docker-compatible engine
+  - Permission to pull images and create containers
+  - The Docker endpoint available to Testcontainers
 
-On Windows, start Docker Desktop before running either app. A `DockerUnavailableException` means the Docker engine is stopped or its endpoint is not accessible.
+On Windows, start Docker Desktop before running the Mongo or Postgres app. A `DockerUnavailableException` means the Docker engine is stopped or its endpoint is not accessible. Sqlite.Console runs everywhere the .NET SDK runs.
 
 ### Mongo.Console
 
@@ -590,6 +714,41 @@ The application is a self-checking executable specification. Every successful be
 15. Removal of every demonstration index.
 16. Automatic disposal of the database and all data.
 
+### Sqlite.Console
+
+| Property | Value |
+|---|---|
+| Project | `Sqlite/Sqlite.Console/Sqlite.Console.csproj` |
+| External dependencies | None; embedded SQLite database file |
+| Database | Ephemeral file in the system temp directory |
+| Table | `feature_examples` |
+| Persistent external state | None |
+
+Run it with:
+
+```powershell
+dotnet run --project Sqlite/Sqlite.Console/Sqlite.Console.csproj
+```
+
+The application is a self-checking executable specification. Every successful behavior prints an `[OK]` line; a failed expectation throws and terminates the run. It demonstrates:
+
+1. `TableNameAttribute`, `SensitiveDataAttribute`, and base audit metadata without printing sensitive values.
+2. Mapped and named table existence checks against `sqlite_master`, including the reserved schema argument.
+3. Runtime table creation and the `DELETE`-based truncate reset.
+4. Simple, TTL-overload, compound unique, and directional compound indexes.
+5. The provider distinction that TTL creates a standard index and partial-filter translation is currently reserved.
+6. Single and bulk insert with automatic creation timestamps.
+7. Count, existence, ID lookup, first-or-default, single-or-default, filtered lists, sorting, and LINQ projection.
+8. Single-field and multi-field pagination, totals, and navigation flags.
+9. Single update and transaction-backed `UpdateManyAsync`.
+10. Collection-value removal through EF Core read/modify/write `PullAsync`.
+11. Soft deletion through ID, entity, predicate, and collection workflows.
+12. Default soft-delete filtering and opt-in reads with `includeDeletes: true`.
+13. Restore by ID and entity.
+14. Permanent deletion through the single and bulk APIs.
+15. Removal of every demonstration index.
+16. Disposal of the context and deletion of the database file.
+
 The console applications are demonstrations, not benchmarks. Image tags are pinned for repeatability; update them deliberately after validating database compatibility.
 
 ## Testing and coverage
@@ -598,11 +757,17 @@ The console applications are demonstrations, not benchmarks. Image tags are pinn
 |---|---|---:|---:|
 | `Mongo.Tests` | NUnit 4.6.1, Moq 4.20.72 | 42 passing tests | No |
 | `Postgres.Tests` | NUnit 4.6.1, SQLite/InMemory EF providers | 65 passing tests | No |
+| `Sqlite.Tests` | NUnit 4.6.1, SQLite/InMemory EF providers | 65 passing tests | No |
 
 The PostgreSQL production assembly is measured at:
 
 - 100% line coverage: 581/581
 - 100% branch coverage: 202/202
+
+The SQLite production assembly is measured at:
+
+- 100% line coverage: 566/566
+- 100% branch coverage: 198/198
 
 Run all tests:
 
@@ -610,14 +775,17 @@ Run all tests:
 dotnet test Monorepo.sln
 ```
 
-Collect PostgreSQL coverage:
+Collect PostgreSQL or SQLite coverage:
 
 ```powershell
 dotnet test Postgres/Postgres.Tests/Postgres.Tests.csproj `
   --collect:"XPlat Code Coverage"
+
+dotnet test Sqlite/Sqlite.Tests/Sqlite.Tests.csproj `
+  --collect:"XPlat Code Coverage"
 ```
 
-The test suite uses process-local SQLite and EF Core InMemory providers to cover repository behavior and provider routing without requiring PostgreSQL or Docker.
+The test suites use process-local SQLite and EF Core InMemory providers to cover repository behavior and provider routing without requiring an external database or Docker.
 
 ## Technical specifications
 
@@ -627,6 +795,7 @@ The test suite uses process-local SQLite and EF Core InMemory providers to cover
 | MongoDB.Driver / MongoDB.Bson | 3.10.0 |
 | Entity Framework Core | 10.0.10 |
 | Npgsql EF Core provider | 10.0.3 |
+| SQLite EF Core provider | 10.0.10 |
 | Testcontainers MongoDB / PostgreSQL | 4.13.0 |
 | NUnit | 4.6.1 |
 | NUnit3TestAdapter | 6.2.0 |
@@ -640,9 +809,9 @@ At the time of the latest dependency audit, NuGet reported no outdated direct pa
 ### Dependency injection and lifetimes
 
 - Reuse `MongoClient`; it is designed to be long-lived and manages connection pooling.
-- Scope `PostgresDbContext<T>` and `PostgresRepository<T>` to one request or unit of work.
+- Scope `PostgresDbContext<T>`/`PostgresRepository<T>` and `SqliteDbContext<T>`/`SqliteRepository<T>` to one request or unit of work.
 - Do not share an EF Core repository/context between threads.
-- Prefer constructor injection through `IMongoRepository<T>` or `IPostgresRepository<T>`.
+- Prefer constructor injection through `IMongoRepository<T>`, `IPostgresRepository<T>`, or `ISqliteRepository<T>`.
 
 ### Secrets
 
@@ -667,13 +836,15 @@ At the time of the latest dependency audit, NuGet reported no outdated direct pa
 ## Known limitations
 
 - The libraries provide similar workflows, not identical database semantics.
-- PostgreSQL partial-index expression translation is not implemented.
-- PostgreSQL TTL overloads create standard indexes only.
-- PostgreSQL `PullAsync` is a read/modify/write operation and may be expensive for large result sets.
+- PostgreSQL and SQLite partial-index expression translation is not implemented.
+- PostgreSQL and SQLite TTL overloads create standard indexes only.
+- PostgreSQL and SQLite `PullAsync` is a read/modify/write operation and may be expensive for large result sets.
+- SQLite truncation is an unfiltered `DELETE`; the `cascade` argument is accepted for parity and ignored.
+- SQLite serializes concurrent writes and offers no network access layer.
 - `SensitiveDataAttribute` does not perform protection automatically.
-- The generic PostgreSQL context models one entity type per closed generic context.
+- The generic PostgreSQL and SQLite contexts model one entity type per closed generic context.
 - Runtime table creation is useful for demos but is not a replacement for production migrations.
-- Console applications require Docker and cannot run while the Docker engine is unavailable.
+- The Mongo and Postgres console applications require Docker and cannot run while the Docker engine is unavailable; the Sqlite console application has no such requirement.
 
 ## Build commands
 
@@ -689,6 +860,7 @@ Build individual libraries:
 ```powershell
 dotnet build Mongo/Mongo/Mongo.csproj
 dotnet build Postgres/Postgres/Postgres.csproj
+dotnet build Sqlite/Sqlite/Sqlite.csproj
 ```
 
 Run dependency checks:
@@ -703,7 +875,7 @@ dotnet list Monorepo.sln package --vulnerable --include-transitive
 1. Keep provider-specific behavior explicit.
 2. Add tests for every public behavior and edge case changed.
 3. Run the full solution build and test suite.
-4. Collect coverage when changing the PostgreSQL production assembly.
+4. Collect coverage when changing the PostgreSQL or SQLite production assemblies.
 5. Update this README when APIs, dependencies, images, or operational requirements change.
 
 Copyright 2026 Devspace.

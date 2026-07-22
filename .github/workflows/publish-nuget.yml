@@ -72,12 +72,21 @@ jobs:
           -p:PackageVersion=${{ steps.version.outputs.value }}
           -p:ContinuousIntegrationBuild=true
 
+      - name: Pack SQLite library
+        run: >-
+          dotnet pack Sqlite/Sqlite/Sqlite.csproj
+          --configuration Release
+          --no-restore
+          --output "$PACKAGE_OUTPUT"
+          -p:PackageVersion=${{ steps.version.outputs.value }}
+          -p:ContinuousIntegrationBuild=true
+
       - name: Verify package output
         shell: bash
         run: |
           mapfile -t packages < <(find "$PACKAGE_OUTPUT" -maxdepth 1 -type f -name '*.nupkg' | sort)
-          if [[ "${#packages[@]}" -ne 2 ]]; then
-            echo "::error::Expected exactly two NuGet packages, found ${#packages[@]}."
+          if [[ "${#packages[@]}" -ne 3 ]]; then
+            echo "::error::Expected exactly three NuGet packages, found ${#packages[@]}."
             printf '%s\n' "${packages[@]}"
             exit 1
           fi
