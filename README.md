@@ -4,6 +4,12 @@ Production-oriented repository abstractions for MongoDB, PostgreSQL, and SQLite 
 
 This solution provides three strongly typed libraries with intentionally similar workflows for CRUD, bulk operations, audit timestamps, soft deletion, restore, projections, sorting, pagination, collection updates, and index management. Provider-specific behavior remains available where the databases differ.
 
+## NuGet packages
+
+- [Devspace.Repositories.MongoDB](https://www.nuget.org/packages/Devspace.Repositories.MongoDB)
+- [Devspace.Repositories.PostgreSQL](https://www.nuget.org/packages/Devspace.Repositories.PostgreSQL)
+- [Devspace.Repositories.SQLite](https://www.nuget.org/packages/Devspace.Repositories.SQLite)
+
 ## Contents
 
 - [Projects](#projects)
