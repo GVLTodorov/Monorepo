@@ -1,47 +1,19 @@
 using System.Data.Common;
 using System.Linq.Expressions;
 using System.Reflection;
-#if POSTGRES
 using Npgsql;
 using Postgres.Helpers;
 using SortDirection = Postgres.Helpers.SortDirection;
 namespace Postgres;
-#else
-using Microsoft.Data.Sqlite;
-using Sqlite.Helpers;
-using SortDirection = Sqlite.Helpers.SortDirection;
-namespace Sqlite;
 
-internal static class SqliteProviderInitializer
-{
-    static SqliteProviderInitializer()
-    {
-        SQLitePCL.raw.SetProvider(new SQLitePCL.SQLite3Provider_e_sqlite3());
-        SQLitePCL.raw.FreezeProvider();
-    }
-
-    public static void EnsureInitialized()
-    {
-    }
-}
-
-#endif
-
-#if POSTGRES
 /// <summary>Generic PostgreSQL repository implemented with Npgsql/ADO.NET.</summary>
 public class PostgresRepository<T> : IPostgresRepository<T>, IAsyncDisposable
     where T : class, IPostgresEntity
-#else
-/// <summary>Generic SQLite repository implemented with Microsoft.Data.Sqlite/ADO.NET.</summary>
-public class SqliteRepository<T> : ISqliteRepository<T>, IAsyncDisposable
-    where T : class, ISqliteEntity
-#endif
 {
     private readonly DbConnection _connection;
     private readonly bool _ownsConnection;
     private readonly PostgresRepositoryCore<T> _sql;
 
-#if POSTGRES
     /// <summary>Creates a repository backed by an Npgsql connection string.</summary>
     public PostgresRepository(string connectionString)
         : this(new NpgsqlConnection(ValidateConnectionString(connectionString)), ownsConnection: true)
@@ -68,34 +40,6 @@ public class SqliteRepository<T> : ISqliteRepository<T>, IAsyncDisposable
 
     /// <summary>True when commands use PostgreSQL SQL semantics.</summary>
     protected virtual bool UsesNpgsqlProvider => _connection is NpgsqlConnection;
-#else
-    /// <summary>Creates a repository backed by a Microsoft.Data.Sqlite connection string.</summary>
-    public SqliteRepository(string connectionString)
-        : this(new SqliteConnection(ValidateConnectionString(connectionString)), ownsConnection: true)
-    {
-    }
-
-    /// <summary>Creates a repository over an existing connection.</summary>
-    public SqliteRepository(DbConnection connection)
-        : this(connection, ownsConnection: false)
-    {
-    }
-
-    private SqliteRepository(DbConnection connection, bool ownsConnection)
-    {
-        SqliteProviderInitializer.EnsureInitialized();
-        _connection = connection ?? throw new ArgumentNullException(nameof(connection));
-        _ownsConnection = ownsConnection;
-        _sql = new PostgresRepositoryCore<T>(
-            connection,
-            SqlDialect.Sqlite,
-            SqliteEntityExtensions.GetTableName<T>(),
-            sql => OnCommandExecuting(sql));
-    }
-
-    /// <summary>True when commands use SQLite SQL semantics.</summary>
-    protected virtual bool UsesSqliteProvider => _connection is SqliteConnection;
-#endif
 
     /// <summary>
     /// Called immediately before a SQL command is created. Derived repositories can use
@@ -603,25 +547,14 @@ public class SqliteRepository<T> : ISqliteRepository<T>, IAsyncDisposable
     }
 }
 
-#if POSTGRES
 /// <summary>Marker interface for PostgreSQL repositories.</summary>
 public interface IPostgresRepository
-#else
-/// <summary>Marker interface for SQLite repositories.</summary>
-public interface ISqliteRepository
-#endif
 {
 }
 
-#if POSTGRES
 /// <summary>Defines the PostgreSQL repository contract for an entity type.</summary>
 /// <typeparam name="T">Entity type.</typeparam>
 public interface IPostgresRepository<T> : IPostgresRepository where T : class, IPostgresEntity
-#else
-/// <summary>Defines the SQLite repository contract for an entity type.</summary>
-/// <typeparam name="T">Entity type.</typeparam>
-public interface ISqliteRepository<T> : ISqliteRepository where T : class, ISqliteEntity
-#endif
 {
     /// <inheritdoc />
     Task CreateIndexAsync(Expression<Func<T, object>> field);

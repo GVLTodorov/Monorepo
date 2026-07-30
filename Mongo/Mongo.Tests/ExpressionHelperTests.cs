@@ -1,4 +1,5 @@
 using System.Linq.Expressions;
+using System.Reflection;
 using Mongo.Helpers;
 
 namespace Mongo.Tests;
@@ -60,6 +61,97 @@ public class ExpressionHelperTests
     }
 
     [Test]
+    public void GetMemberNames_WithNoExpressions_ReturnsEmptyList()
+    {
+        var names = ExpressionHelper.GetMemberNames<TestEntityForExpression>();
+
+        Assert.That(names, Is.Empty);
+    }
+
+    [Test]
+    public void GetMemberName_CoversActionGenericTargetAndMethodExpressions()
+    {
+        Expression<Action<TestEntityForExpression>> action = entity => entity.Clear();
+        Expression<Func<TestEntityForExpression, string>> target = entity => entity.Name;
+        Expression<Func<TestEntityForExpression, object>> method = entity => entity.Describe();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(ExpressionHelper.GetMemberName(action), Is.EqualTo(nameof(TestEntityForExpression.Clear)));
+            Assert.That(
+                ExpressionHelper.GetMemberName<TestEntityForExpression, string>(target),
+                Is.EqualTo(nameof(TestEntityForExpression.Name)));
+            Assert.That(ExpressionHelper.GetMemberName(method), Is.EqualTo(nameof(TestEntityForExpression.Describe)));
+        });
+    }
+
+    [Test]
+    public void GetMemberName_PrivateParser_CoversNullInvalidAndConvertedMethod()
+    {
+        var parser = typeof(ExpressionHelper).GetMethod(
+            "GetMemberName",
+            BindingFlags.Static | BindingFlags.NonPublic,
+            [typeof(Expression)])!;
+        var unaryParser = typeof(ExpressionHelper).GetMethod(
+            "GetMemberName",
+            BindingFlags.Static | BindingFlags.NonPublic,
+            [typeof(UnaryExpression)])!;
+        var parameter = Expression.Parameter(typeof(TestEntityForExpression), "entity");
+        var method = Expression.Call(parameter, nameof(TestEntityForExpression.Describe), Type.EmptyTypes);
+        var convertedMethod = Expression.Convert(method, typeof(object));
+
+        var nullFailure = Assert.Throws<TargetInvocationException>(() => parser.Invoke(null, [null]));
+        var invalidFailure = Assert.Throws<TargetInvocationException>(() =>
+            parser.Invoke(null, [Expression.Constant("invalid")]));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(nullFailure!.InnerException, Is.TypeOf<ArgumentException>());
+            Assert.That(invalidFailure!.InnerException, Is.TypeOf<ArgumentException>());
+            Assert.That(
+                unaryParser.Invoke(null, [convertedMethod]),
+                Is.EqualTo(nameof(TestEntityForExpression.Describe)));
+        });
+    }
+
+    [Test]
+    public void GetMemberType_CoversMemberMethodNullAndInvalidExpressions()
+    {
+        Expression<Func<TestEntityForExpression, object>> member = entity => entity.Name;
+        Expression<Func<TestEntityForExpression, object>> method = entity => entity.Describe();
+        var parser = typeof(ExpressionHelper).GetMethod(
+            "GetMemberType",
+            BindingFlags.Static | BindingFlags.NonPublic,
+            [typeof(Expression)])!;
+
+        var nullFailure = Assert.Throws<TargetInvocationException>(() => parser.Invoke(null, [null]));
+        var invalidFailure = Assert.Throws<TargetInvocationException>(() =>
+            parser.Invoke(null, [Expression.Constant("invalid")]));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(ExpressionHelper.GetMemberType(member), Is.EqualTo(typeof(TestEntityForExpression)));
+            Assert.That(ExpressionHelper.GetMemberType(method), Is.EqualTo(typeof(TestEntityForExpression)));
+            Assert.That(nullFailure!.InnerException, Is.TypeOf<ArgumentException>());
+            Assert.That(invalidFailure!.InnerException, Is.TypeOf<ArgumentException>());
+        });
+    }
+
+    [Test]
+    public void GetMemberValue_CoversNullPropertyValueAndMissingProperty()
+    {
+        var entity = new TestEntityForExpression { Name = null! };
+        Expression<Func<TestEntityForExpression, object>> property = value => value.Name;
+        Expression<Func<TestEntityForExpression, object>> method = value => value.Describe();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(ExpressionHelper.GetMemberValue(property, entity), Is.Null);
+            Assert.That(ExpressionHelper.GetMemberValue(method, entity), Is.Null);
+        });
+    }
+
+    [Test]
     public void AndAlso_CombinesTwoExpressions_WithAndOperator()
     {
         Expression<Func<TestEntityForExpression, bool>> expr1 = x => x.Age > 18;
@@ -88,5 +180,9 @@ public class TestEntityForExpression
 {
     public string Name { get; set; } = string.Empty;
     public int Age { get; set; }
+
+    public string Describe() => Name;
+
+    public void Clear() => Name = string.Empty;
 }
 

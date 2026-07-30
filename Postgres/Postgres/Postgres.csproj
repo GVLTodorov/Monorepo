@@ -21,7 +21,6 @@
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <DefineConstants>$(DefineConstants);POSTGRES</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>

@@ -1,24 +1,13 @@
 using System.Data.Common;
 using System.Linq.Expressions;
 using Microsoft.Data.Sqlite;
-#if POSTGRES
 using Postgres;
 using Postgres.Helpers;
 using SortDirection = Postgres.Helpers.SortDirection;
 namespace Postgres.Tests;
-#else
-using Sqlite;
-using Sqlite.Helpers;
-using SortDirection = Sqlite.Helpers.SortDirection;
-namespace Sqlite.Tests;
-#endif
 
 [TableName("TestRecords")]
-#if POSTGRES
 internal sealed class TestRecord : PostgresEntity
-#else
-internal sealed class TestRecord : SqliteEntity
-#endif
 {
     public string Name { get; set; } = string.Empty;
     public int Score { get; set; }
@@ -29,11 +18,7 @@ internal sealed class TestRecord : SqliteEntity
     public string Secret { get; set; } = string.Empty;
 }
 
-#if POSTGRES
 internal sealed class TestRepository(DbConnection connection) : PostgresRepository<TestRecord>(connection)
-#else
-internal sealed class TestRepository(DbConnection connection) : SqliteRepository<TestRecord>(connection)
-#endif
 {
     public List<string> Commands { get; } = [];
 
@@ -53,9 +38,7 @@ internal sealed class TestDatabase : IAsyncDisposable
 
     public static async Task<TestDatabase> CreateAsync(bool ensureTable = true)
     {
-#if POSTGRES
         SqliteTestProvider.EnsureInitialized();
-#endif
         var connection = new SqliteConnection("Data Source=:memory:");
         var repository = new TestRepository(connection);
         if (ensureTable)
@@ -73,7 +56,6 @@ internal sealed class TestDatabase : IAsyncDisposable
     }
 }
 
-#if POSTGRES
 internal static class SqliteTestProvider
 {
     static SqliteTestProvider()
@@ -86,7 +68,6 @@ internal static class SqliteTestProvider
     {
     }
 }
-#endif
 
 [TestFixture]
 public sealed class PostgresRepositoryTests
@@ -96,15 +77,9 @@ public sealed class PostgresRepositoryTests
     [TestCase("  ")]
     public void ConnectionStringConstructorRejectsInvalidValues(string? connectionString)
     {
-#if POSTGRES
         Assert.That(
             () => new PostgresRepository<TestRecord>(connectionString!),
             Throws.InstanceOf<ArgumentException>());
-#else
-        Assert.That(
-            () => new SqliteRepository<TestRecord>(connectionString!),
-            Throws.InstanceOf<ArgumentException>());
-#endif
     }
 
     [Test]
