@@ -502,7 +502,6 @@ public class MongoRepository<T> : IMongoRepository<T> where T : class, IMongoEnt
                             .Pull(field, value)
             };
 
-
         var updateBuilder = Builders<T>.Update.Combine(updateBuilderList);
         var updateResult = await Collection.UpdateManyAsync(filter, updateBuilder);
 

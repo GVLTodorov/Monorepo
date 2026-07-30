@@ -371,7 +371,7 @@ public sealed class MongoRepositoryCoverageTests
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("write"));
 
-        Assert.DoesNotThrowAsync(async () =>
+        Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await _repository.PullAsync(
                 new StringFieldDefinition<CoverageMongoEntity>("Tags"),
                 "remove"));
