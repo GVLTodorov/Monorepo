@@ -207,15 +207,8 @@ public class SqliteRepository<T> : ISqliteRepository<T>, IAsyncDisposable
         IReadOnlyList<(string PropertyName, bool Descending)> ordering,
         bool includeDeletes)
     {
-        if (pageIndex < 1)
-        {
-            throw new ArgumentOutOfRangeException(nameof(pageIndex));
-        }
-
-        if (pageSize < 1)
-        {
-            throw new ArgumentOutOfRangeException(nameof(pageSize));
-        }
+        ArgumentOutOfRangeException.ThrowIfLessThan(pageIndex, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(pageSize, 1);
 
         var countPredicate = predicate ?? (_ => true);
         var totalCount = await _sql.CountAsync(countPredicate, includeDeletes);
@@ -534,6 +527,8 @@ public class SqliteRepository<T> : ISqliteRepository<T>, IAsyncDisposable
         {
             await _connection.DisposeAsync();
         }
+
+        GC.SuppressFinalize(this);
     }
 
     private static string ValidateConnectionString(string connectionString)

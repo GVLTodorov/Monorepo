@@ -82,6 +82,36 @@ public sealed class PostgresRepositoryTests
             Throws.InstanceOf<ArgumentException>());
     }
 
+    [TestCase(0, 10, "pageIndex")]
+    [TestCase(-1, 10, "pageIndex")]
+    [TestCase(1, 0, "pageSize")]
+    [TestCase(1, -1, "pageSize")]
+    public async Task GetPagedListAsync_ValueBelowOne_ThrowsForExpectedParameter(
+        int pageIndex,
+        int pageSize,
+        string expectedParameter)
+    {
+        await using var database = await TestDatabase.CreateAsync();
+
+        var exception = Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            async () => await database.Repository.GetPagedListAsync(pageIndex, pageSize));
+
+        Assert.That(exception!.ParamName, Is.EqualTo(expectedParameter));
+    }
+
+    [Test]
+    public async Task DisposeAsync_WithInjectedConnection_LeavesConnectionUsable()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        var repository = new TestRepository(connection);
+        await repository.EnsureTableAsync();
+
+        await repository.DisposeAsync();
+
+        Assert.That(connection.State, Is.EqualTo(System.Data.ConnectionState.Open));
+        Assert.That(await repository.TableExistsAsync(), Is.True);
+    }
+
     [Test]
     public async Task EnsureTableIsIdempotentAndSafeForConcurrentCallers()
     {
