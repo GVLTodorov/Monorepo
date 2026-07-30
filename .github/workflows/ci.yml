@@ -1,0 +1,91 @@
+name: Build and test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "true"
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5.2.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore Monorepo.sln
+
+      - name: Build
+        run: dotnet build Monorepo.sln --configuration Release --no-restore -p:ContinuousIntegrationBuild=true
+
+      - name: Test
+        run: dotnet test Monorepo.sln --configuration Release --no-build --nologo --verbosity minimal -p:ContinuousIntegrationBuild=true
+
+  benchmarks:
+    name: Run benchmarks
+    needs: build-and-test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5.2.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Run MongoDB benchmarks
+        run: dotnet run --project Mongo/Mongo.Benchmark/Mongo.Benchmark.csproj -c Release -- --filter "*"
+
+      - name: Run PostgreSQL benchmarks
+        run: dotnet run --project Postgres/Postgres.Benchmark/Postgres.Benchmark.csproj -c Release -- --filter "*"
+
+      - name: Run SQLite benchmarks
+        run: dotnet run --project Sqlite/Sqlite.Benchmark/Sqlite.Benchmark.csproj -c Release -- --filter "*"
+
+      - name: Publish benchmark report to job summary
+        shell: bash
+        run: |
+          {
+            echo "# Benchmark results"
+            echo
+            echo "Runner: ubuntu-latest, commit ${{ github.sha }}"
+            for project in Mongo/Mongo.Benchmark Postgres/Postgres.Benchmark Sqlite/Sqlite.Benchmark; do
+              report="$project/BenchmarkDotNet.Artifacts/results/$(basename "$project").RepositoryBenchmarks-report-github.md"
+              if [[ -f "$report" ]]; then
+                echo
+                echo "## ${project#*/}"
+                echo
+                cat "$report"
+              else
+                echo
+                echo "## ${project#*/}"
+                echo
+                echo "_No report found at $report_"
+              fi
+            done
+          } >> "$GITHUB_STEP_SUMMARY"

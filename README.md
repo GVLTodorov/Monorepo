@@ -777,20 +777,22 @@ Each provider measures the same operations:
 
 Measured on 2026-07-30 with BenchmarkDotNet 0.15.8, .NET 10.0.10, Windows 11, and an Intel Core i7-10875H CPU. Values are per repository call. Allocations are managed allocations reported by `MemoryDiagnoser`.
 
-| Provider | Method | Mean | StdDev | Allocated |
+Within each method, providers are ordered fastest to slowest.
+
+| Method | Provider | Mean | StdDev | Allocated |
 |---|---|---:|---:|---:|
-| MongoDB | `GetByIdAsync` | 1.206 ms | 0.1134 ms | 59.31 KB |
-| MongoDB | `GetFilteredAsync` | 6.797 ms | 0.4948 ms | 680.79 KB |
-| MongoDB | `GetPageAsync` | 3.844 ms | 0.3168 ms | 94.11 KB |
-| MongoDB | `CountFilteredAsync` | 1.141 ms | 0.1033 ms | 28.17 KB |
-| PostgreSQL | `GetByIdAsync` | 0.7962 ms | 0.0661 ms | 9.92 KB |
-| PostgreSQL | `GetFilteredAsync` | 2.6027 ms | 0.2369 ms | 727.23 KB |
-| PostgreSQL | `GetPageAsync` | 1.8496 ms | 0.0831 ms | 50.64 KB |
-| PostgreSQL | `CountFilteredAsync` | 0.8560 ms | 0.0606 ms | 4.83 KB |
-| SQLite | `GetByIdAsync` | 0.1334 ms | 0.0147 ms | 10.59 KB |
-| SQLite | `GetFilteredAsync` | 4.5928 ms | 0.3640 ms | 943.04 KB |
-| SQLite | `GetPageAsync` | 1.3563 ms | 0.1812 ms | 61.32 KB |
-| SQLite | `CountFilteredAsync` | 0.1495 ms | 0.0245 ms | 4.20 KB |
+| `GetByIdAsync` | SQLite | 0.1334 ms | 0.0147 ms | 10.59 KB |
+| `GetByIdAsync` | PostgreSQL | 0.7962 ms | 0.0661 ms | 9.92 KB |
+| `GetByIdAsync` | MongoDB | 1.206 ms | 0.1134 ms | 59.31 KB |
+| `GetFilteredAsync` | PostgreSQL | 2.6027 ms | 0.2369 ms | 727.23 KB |
+| `GetFilteredAsync` | SQLite | 4.5928 ms | 0.3640 ms | 943.04 KB |
+| `GetFilteredAsync` | MongoDB | 6.797 ms | 0.4948 ms | 680.79 KB |
+| `GetPageAsync` | SQLite | 1.3563 ms | 0.1812 ms | 61.32 KB |
+| `GetPageAsync` | PostgreSQL | 1.8496 ms | 0.0831 ms | 50.64 KB |
+| `GetPageAsync` | MongoDB | 3.844 ms | 0.3168 ms | 94.11 KB |
+| `CountFilteredAsync` | SQLite | 0.1495 ms | 0.0245 ms | 4.20 KB |
+| `CountFilteredAsync` | PostgreSQL | 0.8560 ms | 0.0606 ms | 4.83 KB |
+| `CountFilteredAsync` | MongoDB | 1.141 ms | 0.1033 ms | 28.17 KB |
 
 These numbers describe one machine and one local container configuration; they are a reproducible baseline, not a universal database ranking. MongoDB and PostgreSQL include their real driver and local container network paths, while SQLite executes in-process against a local file.
 
