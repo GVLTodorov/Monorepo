@@ -812,7 +812,26 @@ Use `--job Dry` before a full run when validating environment or code changes. B
 | `Postgres.Tests` | NUnit 4.6.1, Microsoft.Data.Sqlite | 32 passing tests | No |
 | `Sqlite.Tests` | NUnit 4.6.1, Microsoft.Data.Sqlite | 32 passing tests | No |
 
-The latest solution run passed all 106 tests. Generate a fresh coverage report when coverage figures are required; this README does not preserve potentially stale line or branch percentages.
+The latest solution run passed all 106 tests.
+
+### Test coverage
+
+Coverage was collected on 2026-07-30 from all 106 passing tests with Coverlet's Cobertura collector. Test and benchmark assemblies are excluded, and automatically generated property accessors are skipped.
+
+| Production library | Line coverage | Branch coverage | Covered lines | Covered branches |
+|---|---:|---:|---:|---:|
+| MongoDB | 33.50% | 28.40% | 193 / 576 | 50 / 176 |
+| PostgreSQL | 78.42% | 66.72% | 854 / 1,089 | 359 / 538 |
+| SQLite | 78.53% | 66.79% | 860 / 1,095 | 358 / 536 |
+| **Overall** | **69.09%** | **61.36%** | **1,907 / 2,760** | **767 / 1,250** |
+
+Regenerate the raw Cobertura reports:
+
+```powershell
+dotnet test Monorepo.sln `
+  --collect:"XPlat Code Coverage" `
+  --results-directory TestResults/coverage-analysis/raw
+```
 
 Run all tests:
 
