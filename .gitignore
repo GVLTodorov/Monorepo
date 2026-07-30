@@ -372,5 +372,6 @@ test:.cs
 
 # Test and coverage output
 **/TestResults/
+**/BenchmarkDotNet.Artifacts/
 
 Reference

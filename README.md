@@ -20,6 +20,7 @@ This solution provides three strongly typed libraries with intentionally similar
 - [Sqlite library](#sqlite-library)
 - [Shared behavior](#shared-behavior)
 - [Console applications](#console-applications)
+- [Benchmarks](#benchmarks)
 - [Testing and coverage](#testing-and-coverage)
 - [Technical specifications](#technical-specifications)
 - [Production guidance](#production-guidance)
@@ -32,21 +33,24 @@ This solution provides three strongly typed libraries with intentionally similar
 Monorepo/
 |-- Mongo/
 |   |-- Mongo/                  MongoDB repository library
+|   |-- Mongo.Benchmark/        BenchmarkDotNet + MongoDB Testcontainers
 |   |-- Mongo.Console/          MongoDB Testcontainers demonstration
 |   `-- Mongo.Tests/            NUnit unit tests
 |-- Postgres/
 |   |-- Postgres/               PostgreSQL repository library
+|   |-- Postgres.Benchmark/     BenchmarkDotNet + PostgreSQL Testcontainers
 |   |-- Postgres.Console/       PostgreSQL Testcontainers CRUD demonstration
 |   `-- Postgres.Tests/         NUnit unit and provider-level tests
 |-- Sqlite/
 |   |-- Sqlite/                 SQLite repository library
+|   |-- Sqlite.Benchmark/       BenchmarkDotNet + ephemeral SQLite database
 |   |-- Sqlite.Console/         SQLite embedded CRUD demonstration (no Docker)
 |   `-- Sqlite.Tests/           NUnit unit and provider-level tests
 |-- Monorepo.sln
 `-- README.md
 ```
 
-All nine projects target `net10.0`. The three library projects are packable and generate XML API documentation.
+All twelve projects target `net10.0`. The three library projects are packable and generate XML API documentation.
 
 ## Choose a database
 
@@ -756,23 +760,59 @@ The application is a self-checking executable specification. Every successful be
 
 The console applications are demonstrations, not benchmarks. Image tags are pinned for repeatability; update them deliberately after validating database compatibility.
 
+## Benchmarks
+
+The permanent BenchmarkDotNet projects exercise the public repository APIs against 1,000 deterministic records. MongoDB runs in a `mongo:6.0` Testcontainer configured as a single-node replica set, and PostgreSQL runs in a `postgres:15.1` Testcontainer. Container startup, schema/index creation, and record seeding happen before BenchmarkDotNet starts the timed workload.
+
+SQLite is an embedded database rather than a database server, so there is no SQLite Testcontainer connection endpoint for the repository to use. Its equivalent benchmark creates an isolated temporary database file, seeds it, runs the measurements through `Microsoft.Data.Sqlite`, and deletes the file afterward.
+
+Each provider measures the same operations:
+
+- `GetByIdAsync`: retrieve one record by its primary identifier.
+- `GetFilteredAsync`: materialize and sort the 500 records whose category is `Even`.
+- `GetPageAsync`: retrieve page 10 with 25 records from that filtered and sorted result, including the total count.
+- `CountFilteredAsync`: count the 500 records whose category is `Even`.
+
+### Measured results
+
+Measured on 2026-07-30 with BenchmarkDotNet 0.15.8, .NET 10.0.10, Windows 11, and an Intel Core i7-10875H CPU. Values are per repository call. Allocations are managed allocations reported by `MemoryDiagnoser`.
+
+| Provider | Method | Mean | StdDev | Allocated |
+|---|---|---:|---:|---:|
+| MongoDB | `GetByIdAsync` | 1.206 ms | 0.1134 ms | 59.31 KB |
+| MongoDB | `GetFilteredAsync` | 6.797 ms | 0.4948 ms | 680.79 KB |
+| MongoDB | `GetPageAsync` | 3.844 ms | 0.3168 ms | 94.11 KB |
+| MongoDB | `CountFilteredAsync` | 1.141 ms | 0.1033 ms | 28.17 KB |
+| PostgreSQL | `GetByIdAsync` | 0.7962 ms | 0.0661 ms | 9.92 KB |
+| PostgreSQL | `GetFilteredAsync` | 2.6027 ms | 0.2369 ms | 727.23 KB |
+| PostgreSQL | `GetPageAsync` | 1.8496 ms | 0.0831 ms | 50.64 KB |
+| PostgreSQL | `CountFilteredAsync` | 0.8560 ms | 0.0606 ms | 4.83 KB |
+| SQLite | `GetByIdAsync` | 0.1334 ms | 0.0147 ms | 10.59 KB |
+| SQLite | `GetFilteredAsync` | 4.5928 ms | 0.3640 ms | 943.04 KB |
+| SQLite | `GetPageAsync` | 1.3563 ms | 0.1812 ms | 61.32 KB |
+| SQLite | `CountFilteredAsync` | 0.1495 ms | 0.0245 ms | 4.20 KB |
+
+These numbers describe one machine and one local container configuration; they are a reproducible baseline, not a universal database ranking. MongoDB and PostgreSQL include their real driver and local container network paths, while SQLite executes in-process against a local file.
+
+Run the complete benchmark projects in Release mode:
+
+```powershell
+dotnet run --project Mongo/Mongo.Benchmark/Mongo.Benchmark.csproj -c Release -- --filter "*" --noOverwrite
+dotnet run --project Postgres/Postgres.Benchmark/Postgres.Benchmark.csproj -c Release -- --filter "*" --noOverwrite
+dotnet run --project Sqlite/Sqlite.Benchmark/Sqlite.Benchmark.csproj -c Release -- --filter "*" --noOverwrite
+```
+
+Use `--job Dry` before a full run when validating environment or code changes. BenchmarkDotNet writes the detailed Markdown and CSV reports under each project's `BenchmarkDotNet.Artifacts` directory.
+
 ## Testing and coverage
 
 | Test project | Framework | Current result | External database required |
 |---|---|---:|---:|
 | `Mongo.Tests` | NUnit 4.6.1, Moq 4.20.72 | 42 passing tests | No |
-| `Postgres.Tests` | NUnit 4.6.1, SQLite/InMemory EF providers | 65 passing tests | No |
-| `Sqlite.Tests` | NUnit 4.6.1, SQLite/InMemory EF providers | 65 passing tests | No |
+| `Postgres.Tests` | NUnit 4.6.1, Microsoft.Data.Sqlite | 32 passing tests | No |
+| `Sqlite.Tests` | NUnit 4.6.1, Microsoft.Data.Sqlite | 32 passing tests | No |
 
-The PostgreSQL production assembly is measured at:
-
-- 100% line coverage: 581/581
-- 100% branch coverage: 202/202
-
-The SQLite production assembly is measured at:
-
-- 100% line coverage: 566/566
-- 100% branch coverage: 198/198
+The latest solution run passed all 106 tests. Generate a fresh coverage report when coverage figures are required; this README does not preserve potentially stale line or branch percentages.
 
 Run all tests:
 
@@ -801,6 +841,7 @@ The relational test suites use process-local SQLite connections to cover ADO.NET
 | Npgsql | 10.0.3 |
 | Microsoft.Data.Sqlite.Core | 10.0.10 |
 | Testcontainers MongoDB / PostgreSQL | 4.13.0 |
+| BenchmarkDotNet | 0.15.8 |
 | NUnit | 4.6.1 |
 | NUnit3TestAdapter | 6.2.0 |
 | Microsoft.NET.Test.Sdk | 18.8.1 |
