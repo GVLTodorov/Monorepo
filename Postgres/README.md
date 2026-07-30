@@ -1,6 +1,6 @@
 # PostgreSQL repository library
 
-`Postgres` provides the relational counterpart to the sibling MongoDB repository. It uses Entity Framework Core and Npgsql to expose strongly typed CRUD, audit fields, soft deletion, projection, pagination, collection-value removal, index management, and table lifecycle helpers.
+`Postgres` provides the relational counterpart to the sibling MongoDB repository. It uses Npgsql and ADO.NET commands to expose strongly typed CRUD, audit fields, soft deletion, projection, pagination, collection-value removal, index management, and table lifecycle helpers.
 
 For the side-by-side MongoDB/PostgreSQL comparison and solution-wide guidance, see the [root documentation](../README.md).
 
@@ -10,10 +10,10 @@ For the side-by-side MongoDB/PostgreSQL comparison and solution-wide guidance, s
 |---|---|
 | Target framework | .NET 10 (`net10.0`) |
 | Package and assembly | `Postgres` |
-| ORM | Entity Framework Core 10.0.10 |
-| Provider | Npgsql.EntityFrameworkCore.PostgreSQL 10.0.3 |
+| Data layer | ADO.NET; no ORM |
+| Provider | Npgsql 10.0.3 |
 | Identifier | GUID represented as a string, maximum length 64 |
-| Data access | EF Core LINQ expressions |
+| Data access | Parameterized SQL translated from a focused LINQ-expression subset |
 | Table naming | Type or `[TableName]` converted to `snake_case`; trailing `Entity` removed |
 | Audit behavior | Automatic created, updated, deleted, and soft-delete fields |
 
@@ -23,7 +23,7 @@ Choose this library when the application depends on relational constraints, SQL 
 
 ### Advantages
 
-- Familiar EF Core and LINQ query model.
+- Low-overhead, parameterized Npgsql commands with a familiar expression-based API.
 - PostgreSQL constraints, transactions, indexing, and operational ecosystem.
 - Consistent CRUD workflow with the MongoDB repository.
 - Built-in audit timestamps, soft delete, restore, projection, and pagination.
@@ -33,8 +33,8 @@ Choose this library when the application depends on relational constraints, SQL 
 ### Tradeoffs
 
 - Schema evolution needs disciplined migrations in production.
-- Each `PostgresDbContext<T>` models one entity type, so this abstraction is not intended for relationship-rich aggregate graphs.
-- Repository and `DbContext` instances are scoped units of work and are not safe for concurrent use.
+- Each repository maps one entity type, so this abstraction is not intended for relationship-rich aggregate graphs.
+- A repository owns one connection and is not intended for concurrent operations.
 - `PullAsync` loads matching entities, modifies their collection values in memory, and persists them; this can cost more than MongoDB's server-side array update.
 - PostgreSQL has no native MongoDB-style TTL index in this API.
 - `[SensitiveData]` is metadata only; it does not encrypt, redact, or omit a value automatically.
@@ -83,15 +83,14 @@ Create a repository directly:
 var repository = new PostgresRepository<UserEntity>(connectionString);
 ```
 
-For dependency injection, register a scoped context and repository:
+For dependency injection, register a scoped repository:
 
 ```csharp
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Postgres;
 
-services.AddScoped(_ => new PostgresDbContext<UserEntity>(connectionString));
-services.AddScoped<IPostgresRepository<UserEntity>, PostgresRepository<UserEntity>>();
+services.AddScoped<IPostgresRepository<UserEntity>>(_ =>
+    new PostgresRepository<UserEntity>(connectionString));
 ```
 
 Keep credentials outside source control. Use a secret store, environment variable, managed identity, or another deployment-specific configuration provider.
@@ -137,7 +136,7 @@ The update dictionary uses CLR property names. Invalid, unmapped, or incompatibl
 using Postgres.Helpers;
 
 var admins = await repository.GetAllAsync(
-    predicate: user => user.Roles.Contains("Admin"),
+    predicate: user => user.Email.EndsWith("@example.test"),
     orderBy: user => user.Name,
     sortDirection: SortDirection.Ascending);
 
@@ -176,7 +175,7 @@ Page indexes are one-based. `pageIndex` and `pageSize` must be positive.
 
 ## Projection
 
-PostgreSQL projections are standard LINQ expressions and are translated by EF Core:
+PostgreSQL projections are standard LINQ expressions applied after matching rows are materialized:
 
 ```csharp
 var summaries = await repository.GetAllAsync(
@@ -186,10 +185,10 @@ var summaries = await repository.GetAllAsync(
         user.Name,
         user.Email
     },
-    predicate: user => user.Roles.Contains("Admin"));
+    predicate: user => user.Email.EndsWith("@example.test"));
 ```
 
-Use provider-translatable expressions and project only the columns the caller needs.
+Predicates are translated to parameterized SQL. Entity property comparisons, Boolean composition, null checks, string `StartsWith`/`EndsWith`/`Contains`, and constant-collection `Contains` are supported. Unsupported predicates throw `NotSupportedException`.
 
 ## Remove collection values
 
@@ -200,7 +199,7 @@ await repository.PullAsync(
     documentPredicate: user => user.Email.EndsWith("@example.test"));
 ```
 
-Unlike MongoDB's atomic array operator, this implementation reads matching rows, updates the mapped collection in memory, and saves changes through EF Core. Keep the predicate selective for large tables.
+Unlike MongoDB's atomic array operator, this implementation reads matching rows, updates the mapped collection in memory, and writes changes with parameterized commands. Keep the predicate selective for large tables.
 
 ## Table lifecycle
 
@@ -212,7 +211,7 @@ await repository.EnsureTableAsync();
 await repository.TruncateTableAsync(restartIdentity: true, cascade: false);
 ```
 
-`EnsureTableAsync` is convenient for demonstrations and isolated runtime-owned tables. Prefer reviewed EF Core migrations for production schema evolution. `TruncateTableAsync` bypasses soft deletion and should be restricted to intentional administrative or test workflows.
+`EnsureTableAsync` is convenient for demonstrations and isolated runtime-owned tables. Prefer reviewed, versioned SQL scripts for production schema evolution. `TruncateTableAsync` bypasses soft deletion and should be restricted to intentional administrative or test workflows.
 
 ## Indexes
 
@@ -236,7 +235,7 @@ The directional overload accepts `(property expression, SortDirection)` tuples. 
 
 List, paging, first, projection, and existence operations exclude soft-deleted rows by default. Pass the applicable `includeDeletes` or `includeDeleted` argument when an API provides it and deleted rows must be returned. Restore clears the deletion state; hard delete permanently removes a row.
 
-`CountAsync` and `GetSingleOrDefaultAsync` execute their supplied predicates, so include `!entity.IsDeleted` explicitly when counting or selecting only active records.
+`CountAsync` and `GetSingleOrDefaultAsync` execute their supplied predicates without the default soft-delete filter, so include `entity.DeletedDateTime == null` when selecting only active records.
 
 ## Console demonstration
 
@@ -250,7 +249,7 @@ The sibling console app is a self-checking executable specification. It starts `
 6. Count, check existence, and run ID, first, single, filtered, sorted, and projected reads.
 7. Run single-field and multi-field pagination with totals and navigation flags.
 8. Update one row and apply a transaction-backed shared update.
-9. Remove temporary tags with EF Core read/modify/write `PullAsync`.
+9. Remove temporary tags with ADO.NET read/modify/write `PullAsync`.
 10. Exercise ID, entity, predicate, and collection deletion workflows.
 11. Verify default soft-delete filtering, include-deleted reads, both restore overloads, and hard deletion.
 12. Remove every demonstration index.
@@ -280,15 +279,15 @@ dotnet test Postgres/Postgres.Tests/Postgres.Tests.csproj
 dotnet test Postgres/Postgres.Tests/Postgres.Tests.csproj --collect:"XPlat Code Coverage"
 ```
 
-The PostgreSQL suite currently contains 65 passing tests. The latest coverage collection records 100% of production lines and branches for the `Postgres` assembly (581/581 lines and 202/202 branches).
+The PostgreSQL suite includes ADO.NET repository behavior tests plus entity, expression-helper, paging, attribute, and sorting tests.
 
 Coverage is a safety signal rather than a substitute for meaningful assertions. Preserve behavior-focused tests when extending the API.
 
 ## Operational guidance
 
-- Use one scoped repository/context per unit of work.
-- Await each database operation before starting another on the same context.
-- Use migrations for production schema changes.
+- Use one scoped repository per unit of work.
+- Await each database operation before starting another on the same repository.
+- Use versioned SQL migrations for production schema changes.
 - Index fields used by common predicates and sorts, but avoid redundant indexes.
 - Prefer projections and pagination for large data sets.
 - Use UTC timestamps consistently.

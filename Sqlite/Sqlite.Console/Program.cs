@@ -16,12 +16,8 @@ public static class Program
 
         try
         {
-            // The context is disposed before the database file is deleted; a repository
-            // built from a bare connection string would keep the file locked here.
-            await using (var context = new SqliteDbContext<ExampleEntity>($"Data Source={databasePath}"))
+            await using (var repository = new SqliteRepository<ExampleEntity>($"Data Source={databasePath}"))
             {
-                var repository = new SqliteRepository<ExampleEntity>(context);
-
                 ShowMetadata();
                 await TableLifecycleAsync(repository);
                 await CreateIndexesAsync(repository);
@@ -145,7 +141,7 @@ public static class Program
                 entity.TestField
             },
             predicate: entity => entity.Category == "Greeting");
-        Check(summaries.Count == 3, "Projection returns only the requested columns");
+        Check(summaries.Count == 3, "Projection returns the requested object shape");
 
         Check(await repository.ExistsAsync(entity => entity.ExternalId == "sqlite-004"), "ExistsAsync finds an active row");
 
@@ -214,7 +210,7 @@ public static class Program
 
         var afterPull = await repository.GetAllAsync(
             predicate: entity => entity.Category == "UpdatedBatch");
-        Check(afterPull.All(entity => !entity.Tags.Contains("temporary")), "PullAsync removes collection values through EF Core read/modify/write");
+        Check(afterPull.All(entity => !entity.Tags.Contains("temporary")), "PullAsync removes collection values through ADO.NET read/modify/write");
     }
 
     private static async Task DeleteAndRestoreAsync(

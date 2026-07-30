@@ -1,207 +1,215 @@
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Storage;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
-using Sqlite.Helpers;
-using System.Data;
+using System.Data.Common;
 using System.Linq.Expressions;
 using System.Reflection;
+#if POSTGRES
+using Npgsql;
+using Postgres.Helpers;
+using SortDirection = Postgres.Helpers.SortDirection;
+namespace Postgres;
+#else
+using Microsoft.Data.Sqlite;
+using Sqlite.Helpers;
 using SortDirection = Sqlite.Helpers.SortDirection;
-
 namespace Sqlite;
 
-/// <summary>
-/// Generic Repository for SQLite using Entity Framework Core
-/// </summary>
-public class SqliteRepository<T> : ISqliteRepository<T> where T : class, ISqliteEntity
+internal static class SqliteProviderInitializer
 {
-    private readonly SqliteDbContext<T> _context;
-    private readonly string _tableName;
-    private readonly SemaphoreSlim _ensureTableLock = new(1, 1);
-    private bool _tableEnsured;
+    static SqliteProviderInitializer()
+    {
+        SQLitePCL.raw.SetProvider(new SQLitePCL.SQLite3Provider_e_sqlite3());
+        SQLitePCL.raw.FreezeProvider();
+    }
 
-    /// <summary>Gets the EF Core entity set used by the repository.</summary>
-    protected DbSet<T> DbSet => _context.Entities;
+    public static void EnsureInitialized()
+    {
+    }
+}
 
-    private ILogger Logger { get; set; }
+#endif
 
-    /// <summary>
-    /// Gets whether this repository is using the SQLite provider. The virtual
-    /// seam allows provider-specific orchestration to be tested with other providers.
-    /// </summary>
-    protected virtual bool UsesSqliteProvider =>
-        _context.Database.ProviderName!.Contains("Sqlite", StringComparison.OrdinalIgnoreCase);
+#if POSTGRES
+/// <summary>Generic PostgreSQL repository implemented with Npgsql/ADO.NET.</summary>
+public class PostgresRepository<T> : IPostgresRepository<T>, IAsyncDisposable
+    where T : class, IPostgresEntity
+#else
+/// <summary>Generic SQLite repository implemented with Microsoft.Data.Sqlite/ADO.NET.</summary>
+public class SqliteRepository<T> : ISqliteRepository<T>, IAsyncDisposable
+    where T : class, ISqliteEntity
+#endif
+{
+    private readonly DbConnection _connection;
+    private readonly bool _ownsConnection;
+    private readonly SqliteRepositoryCore<T> _sql;
 
-    /// <summary>
-    /// Constructor accepting a connection string.
-    /// The repository will create its own DbContext instance.
-    /// </summary>
-    /// <param name="connectionString"></param>
+#if POSTGRES
+    /// <summary>Creates a repository backed by an Npgsql connection string.</summary>
+    public PostgresRepository(string connectionString)
+        : this(new NpgsqlConnection(ValidateConnectionString(connectionString)), ownsConnection: true)
+    {
+    }
+
+    /// <summary>Creates a repository over an existing connection.</summary>
+    public PostgresRepository(DbConnection connection)
+        : this(connection, ownsConnection: false)
+    {
+    }
+
+    private PostgresRepository(DbConnection connection, bool ownsConnection)
+    {
+        _connection = connection ?? throw new ArgumentNullException(nameof(connection));
+        _ownsConnection = ownsConnection;
+        var dialect = connection is NpgsqlConnection ? SqlDialect.PostgreSql : SqlDialect.Sqlite;
+        _sql = new SqliteRepositoryCore<T>(
+            connection,
+            dialect,
+            PostgresEntityExtensions.GetTableName<T>(),
+            sql => OnCommandExecuting(sql));
+    }
+
+    /// <summary>True when commands use PostgreSQL SQL semantics.</summary>
+    protected virtual bool UsesNpgsqlProvider => _connection is NpgsqlConnection;
+#else
+    /// <summary>Creates a repository backed by a Microsoft.Data.Sqlite connection string.</summary>
     public SqliteRepository(string connectionString)
+        : this(new SqliteConnection(ValidateConnectionString(connectionString)), ownsConnection: true)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
-        _context = new SqliteDbContext<T>(connectionString);
-        _tableName = SqliteEntityExtensions.GetTableName<T>();
-        Logger = new NullLoggerFactory().CreateLogger<SqliteRepository<T>>();
     }
+
+    /// <summary>Creates a repository over an existing connection.</summary>
+    public SqliteRepository(DbConnection connection)
+        : this(connection, ownsConnection: false)
+    {
+    }
+
+    private SqliteRepository(DbConnection connection, bool ownsConnection)
+    {
+        SqliteProviderInitializer.EnsureInitialized();
+        _connection = connection ?? throw new ArgumentNullException(nameof(connection));
+        _ownsConnection = ownsConnection;
+        _sql = new SqliteRepositoryCore<T>(
+            connection,
+            SqlDialect.Sqlite,
+            SqliteEntityExtensions.GetTableName<T>(),
+            sql => OnCommandExecuting(sql));
+    }
+
+    /// <summary>True when commands use SQLite SQL semantics.</summary>
+    protected virtual bool UsesSqliteProvider => _connection is SqliteConnection;
+#endif
 
     /// <summary>
-    /// Constructor accepting an existing DbContext instance.
-    /// This allows for better control over the context's lifecycle and configuration.
+    /// Called immediately before a SQL command is created. Derived repositories can use
+    /// this non-EF hook for diagnostics and tests.
     /// </summary>
-    /// <param name="context"></param>
-    /// <exception cref="ArgumentNullException"></exception>
-    public SqliteRepository(SqliteDbContext<T> context)
+    protected virtual void OnCommandExecuting(string commandText)
     {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-        _tableName = SqliteEntityExtensions.GetTableName<T>();
-        Logger = new NullLoggerFactory().CreateLogger<SqliteRepository<T>>();
     }
 
-
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public Task CreateIndexAsync(Expression<Func<T, object>> field)
     {
-        return CreateIndexAsync([field], null, false);
+        ArgumentNullException.ThrowIfNull(field);
+        return CreateIndexAsync([field]);
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public Task CreateIndexAsync(Expression<Func<T, object>> field, TimeSpan expiresAfter)
     {
-        Logger.LogDebug("SQLite does not support TTL indexes; creating standard index.");
-
+        ArgumentNullException.ThrowIfNull(field);
         return CreateIndexAsync(field);
     }
 
-    /// <inheritdoc/>
-    public async Task CreateIndexAsync(IEnumerable<Expression<Func<T, object>>> fields, Expression<Func<T, bool>>? filter = null, bool unique = false)
+    /// <inheritdoc />
+    public Task CreateIndexAsync(
+        IEnumerable<Expression<Func<T, object>>> fields,
+        Expression<Func<T, bool>>? filter = null,
+        bool unique = false)
     {
         ArgumentNullException.ThrowIfNull(fields);
-        await EnsureTableAsync();
-
-        var fieldList = fields.ToList();
-        if (fieldList.Count == 0)
+        var items = fields
+            .Select(field => (_sql.GetMemberName(field), Descending: false))
+            .ToArray();
+        if (items.Length == 0)
         {
-            throw new ArgumentException("Index must have at least one field", nameof(fields));
+            throw new ArgumentException("Index must have at least one field.", nameof(fields));
         }
 
-        var columns =
-            fieldList.Select(f =>
-                QuoteColumn(ExpressionHelper.GetMemberName(f))).ToList();
-
-        var idxName = $"idx_{_tableName}_{string.Join("_", columns).Replace("\"", "")}";
-        var uniqueStr = unique ? " UNIQUE" : "";
-        // Partial index (WHERE) would require translating expression to SQL; skip for simplicity
-        var indexColumns = string.Join(", ", columns);
-        var sql =
-            $"CREATE{uniqueStr} INDEX IF NOT EXISTS {QuoteIdentifier(idxName)} "
-            + $"ON {QuoteIdentifier(_tableName)} ({indexColumns});";
-
-        await _context.Database.ExecuteSqlRawAsync(sql);
-
-        Logger.LogDebug("Created index {IndexName} on {Table}", idxName, _tableName);
+        return _sql.CreateIndexAsync(items, unique);
     }
 
-    /// <inheritdoc/>
-    public async Task CreateIndexAsync(
+    /// <inheritdoc />
+    public Task CreateIndexAsync(
         IEnumerable<(Expression<Func<T, object>> PropertyExpression, SortDirection Direction)> fields,
         Expression<Func<T, bool>>? filter = null,
         bool unique = false)
     {
         ArgumentNullException.ThrowIfNull(fields);
-        await EnsureTableAsync();
+        var items = fields
+            .Select(field => (
+                _sql.GetMemberName(field.PropertyExpression),
+                Descending: field.Direction == SortDirection.Descending))
+            .ToArray();
+        if (items.Length == 0)
+        {
+            throw new ArgumentException("Index must have at least one field.", nameof(fields));
+        }
 
-        var fieldList = fields.ToList();
-        if (fieldList.Count == 0)
-            throw new ArgumentException("Index must have at least one field", nameof(fields));
-
-        var parts = fieldList.Select(f => QuoteColumn(ExpressionHelper.GetMemberName(f.PropertyExpression)) + (f.Direction == SortDirection.Descending ? " DESC" : " ASC"));
-        var idxName = $"idx_{_tableName}_{string.Join("_", fieldList.Select(f => ExpressionHelper.GetMemberName(f.PropertyExpression)))}";
-        var uniqueStr = unique ? " UNIQUE" : "";
-        var indexColumns = string.Join(", ", parts);
-        var sql =
-            $"CREATE{uniqueStr} INDEX IF NOT EXISTS {QuoteIdentifier(idxName)} "
-            + $"ON {QuoteIdentifier(_tableName)} ({indexColumns});";
-
-        await _context.Database.ExecuteSqlRawAsync(sql);
-
-        Logger.LogDebug("Created index {IndexName} on {Table}", idxName, _tableName);
+        return _sql.CreateIndexAsync(items, unique);
     }
 
-    /// <inheritdoc/>
-    public async Task RemoveIndexAsync(Expression<Func<T, object>> field)
+    /// <inheritdoc />
+    public Task RemoveIndexAsync(Expression<Func<T, object>> field)
     {
         ArgumentNullException.ThrowIfNull(field);
-
-        var memberName = ExpressionHelper.GetMemberName(field);
-        var idxName = $"idx_{_tableName}_{memberName}";
-
-        var sql = $"DROP INDEX IF EXISTS {QuoteIdentifier(idxName)};";
-        await _context.Database.ExecuteSqlRawAsync(sql);
-
+        return _sql.RemoveIndexAsync([_sql.GetMemberName(field)]);
     }
 
-    /// <inheritdoc/>
-    public async Task RemoveIndexAsync(IEnumerable<Expression<Func<T, object>>> fields, Expression<Func<T, bool>>? filter = null, bool unique = false)
+    /// <inheritdoc />
+    public Task RemoveIndexAsync(
+        IEnumerable<Expression<Func<T, object>>> fields,
+        Expression<Func<T, bool>>? filter = null,
+        bool unique = false)
     {
         ArgumentNullException.ThrowIfNull(fields);
+        var names = fields.Select(_sql.GetMemberName).ToArray();
+        if (names.Length == 0)
+        {
+            throw new ArgumentException("Index must have at least one field.", nameof(fields));
+        }
 
-        var fieldList = fields.ToList();
-        if (fieldList.Count == 0)
-            throw new ArgumentException("Index must have at least one field", nameof(fields));
-
-        var idxName = $"idx_{_tableName}_{string.Join("_", fieldList.Select(f => ExpressionHelper.GetMemberName(f)))}";
-
-        var sql = $"DROP INDEX IF EXISTS {QuoteIdentifier(idxName)};";
-        await _context.Database.ExecuteSqlRawAsync(sql);
-
+        return _sql.RemoveIndexAsync(names);
     }
 
-    private static string QuoteColumn(string memberName) => QuoteIdentifier(memberName);
-
-    private static string QuoteIdentifier(string identifier) => $"\"{identifier.Replace("\"", "\"\"")}\"";
-
-
-    /// <inheritdoc/>
-    public async Task<List<T>> GetAllAsync(
+    /// <inheritdoc />
+    public Task<List<T>> GetAllAsync(
         Expression<Func<T, bool>>? predicate = null,
         Expression<Func<T, object>>? orderBy = null,
         SortDirection sortDirection = SortDirection.Ascending,
-        bool includeDeletes = false)
-    {
-        await EnsureTableAsync();
+        bool includeDeletes = false) =>
+        _sql.GetAllAsync(
+            predicate,
+            orderBy is null ? null : _sql.GetMemberName(orderBy),
+            sortDirection == SortDirection.Descending,
+            includeDeletes);
 
-        var query = ApplySoftDelete(DbSet.AsQueryable(), includeDeletes);
-        if (predicate != null)
-            query = query.Where(predicate);
-
-        var ordered = orderBy != null
-            ? (sortDirection == SortDirection.Ascending ? query.OrderBy(orderBy) : query.OrderByDescending(orderBy))
-            : query.OrderBy(e => e.CreatedDateTime);
-
-
-        return await ordered.ToListAsync();
-    }
-
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public async Task<List<TProjection>> GetAllAsync<TProjection>(
         Expression<Func<T, TProjection>> projection,
         Expression<Func<T, bool>>? predicate = null,
         bool includeDeletes = false)
     {
         ArgumentNullException.ThrowIfNull(projection);
-        await EnsureTableAsync();
+        var entities = await _sql.GetAllAsync(
+            predicate,
+            orderBy: null,
+            descending: false,
+            includeDeletes);
+        var projectedEntities = entities.Select(projection.Compile()).ToList();
 
-        var query = ApplySoftDelete(DbSet.AsQueryable(), includeDeletes);
-        if (predicate != null)
-            query = query.Where(predicate);
-
-
-        return await query.Select(projection).ToListAsync();
+        return projectedEntities;
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public Task<IPagedList<T>> GetPagedListAsync(
         int pageIndex = 1,
         int pageSize = 50,
@@ -210,531 +218,536 @@ public class SqliteRepository<T> : ISqliteRepository<T> where T : class, ISqlite
         SortDirection sortDirection = SortDirection.Ascending,
         bool includeDeletes = false)
     {
-        var paged =  GetPagedListAsync(pageIndex, pageSize, predicate,
-            [new SortExpression<T>
-            {
-                Expression = orderBy ?? (e => e.CreatedDateTime),
-                SortDirection = sortDirection
-            }],
-            includeDeletes);
-
-
-        return paged;
+        var ordering = new[]
+        {
+            (
+                orderBy is null ? nameof(IPostgresOrSqliteEntity.CreatedDateTime) : _sql.GetMemberName(orderBy),
+                sortDirection == SortDirection.Descending)
+        };
+        return GetPagedListCoreAsync(pageIndex, pageSize, predicate, ordering, includeDeletes);
     }
 
-    /// <inheritdoc/>
-    public async Task<IPagedList<T>> GetPagedListAsync(
+    /// <inheritdoc />
+    public Task<IPagedList<T>> GetPagedListAsync(
         int pageIndex,
         int pageSize,
         Expression<Func<T, bool>>? predicate,
         SortExpression<T>[] orderBy,
         bool includeDeletes = false)
     {
+        var ordering = orderBy is { Length: > 0 }
+            ? orderBy.Select(item => (
+                _sql.GetMemberName(item.Expression),
+                item.SortDirection == SortDirection.Descending)).ToArray()
+            : [(nameof(IPostgresOrSqliteEntity.CreatedDateTime), false)];
+        return GetPagedListCoreAsync(pageIndex, pageSize, predicate, ordering, includeDeletes);
+    }
+
+    private async Task<IPagedList<T>> GetPagedListCoreAsync(
+        int pageIndex,
+        int pageSize,
+        Expression<Func<T, bool>>? predicate,
+        IReadOnlyList<(string PropertyName, bool Descending)> ordering,
+        bool includeDeletes)
+    {
         if (pageIndex < 1)
         {
             throw new ArgumentOutOfRangeException(nameof(pageIndex));
         }
+
         if (pageSize < 1)
         {
             throw new ArgumentOutOfRangeException(nameof(pageSize));
         }
 
-        await EnsureTableAsync();
-
-        var query = ApplySoftDelete(DbSet.AsQueryable(), includeDeletes);
-        if (predicate != null)
-            query = query.Where(predicate);
-
-        var totalCount = await query.LongCountAsync();
-
-        IOrderedQueryable<T>? ordered;
-        if (orderBy is { Length: > 0 })
-        {
-            var first = orderBy[0];
-            ordered = first.SortDirection == SortDirection.Ascending
-                ? query.OrderBy(first.Expression)
-                : query.OrderByDescending(first.Expression);
-            for (var i = 1; i < orderBy.Length; i++)
-            {
-                var next = orderBy[i];
-                ordered = next.SortDirection == SortDirection.Ascending
-                    ? ordered.ThenBy(next.Expression)
-                    : ordered.ThenByDescending(next.Expression);
-            }
-        }
-        else
-        {
-            ordered = query.OrderBy(e => e.CreatedDateTime);
-        }
-
-        var items = await ordered
-            .Skip((pageIndex - 1) * pageSize)
-            .Take(pageSize)
-            .ToListAsync();
-
-        var totalPages = totalCount > 0 ? (long)Math.Ceiling((double)totalCount / pageSize) : 0;
-
+        var countPredicate = predicate ?? (_ => true);
+        var totalCount = await _sql.CountAsync(countPredicate, includeDeletes);
+        var items = await _sql.GetAllAsync(
+            predicate,
+            ordering,
+            includeDeletes,
+            offset: (pageIndex - 1) * pageSize,
+            limit: pageSize);
+        var totalPages = totalCount == 0 ? 0 : (long)Math.Ceiling((double)totalCount / pageSize);
         return new PagedList<T>(items, pageIndex, pageSize, totalPages, totalCount);
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public async Task<T?> GetFirstOrDefaultAsync(
         Expression<Func<T, bool>>? predicate = null,
         Expression<Func<T, object>>? orderBy = null,
         SortDirection sortDirection = SortDirection.Ascending,
         bool includeDeleted = false)
     {
-        await EnsureTableAsync();
+        var results = await _sql.GetAllAsync(
+            predicate,
+            orderBy is null ? null : _sql.GetMemberName(orderBy),
+            sortDirection == SortDirection.Descending,
+            includeDeleted,
+            limit: 1);
+        var firstResult = results.FirstOrDefault();
 
-        var query = ApplySoftDelete(DbSet.AsQueryable(), includeDeleted);
-        if (predicate != null)
-        {
-            query = query.Where(predicate);
-        }
-
-        var ordered = orderBy != null
-            ? (sortDirection == SortDirection.Ascending ? query.OrderBy(orderBy) : query.OrderByDescending(orderBy))
-            : query.OrderBy(e => e.CreatedDateTime);
-
-
-        var orderedFod = await ordered.FirstOrDefaultAsync();
-
-
-        return orderedFod;
+        return firstResult;
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public async Task<T?> GetSingleOrDefaultAsync(Expression<Func<T, bool>> predicate)
     {
         ArgumentNullException.ThrowIfNull(predicate);
-        await EnsureTableAsync();
-
-        return await DbSet.Where(predicate).SingleOrDefaultAsync();
-    }
-
-    /// <inheritdoc/>
-    public async Task<T?> GetByIdAsync(string id)
-    {
-        return await GetFirstOrDefaultAsync(p => p.Id == id);
-    }
-
-    /// <inheritdoc/>
-    public async Task<long> CountAsync(Expression<Func<T, bool>> predicate)
-    {
-        if (predicate == null) throw new ArgumentNullException(nameof(predicate));
-
-        await EnsureTableAsync();
-
-
-        return await DbSet.Where(predicate).LongCountAsync();
-    }
-
-    /// <inheritdoc/>
-    public async Task<bool> ExistsAsync(Expression<Func<T, bool>> predicate)
-    {
-        if (predicate == null) throw new ArgumentNullException(nameof(predicate));
-
-        await EnsureTableAsync();
-
-        return await ApplySoftDelete(DbSet.AsQueryable(), includeDeleted: false).AnyAsync(predicate);
-    }
-
-    /// <inheritdoc/>
-    public Task<bool> TableExistsAsync() => TableExistsAsync(_tableName, schema: null);
-
-    /// <inheritdoc/>
-    public async Task<bool> TableExistsAsync(string tableName, string? schema = null)
-    {
-        if (string.IsNullOrWhiteSpace(tableName))
-            throw new ArgumentException("Table name is required.", nameof(tableName));
-
-        if (!UsesSqliteProvider)
+        var results = await _sql.GetAllAsync(
+            predicate,
+            orderBy: null,
+            descending: false,
+            includeDeleted: true,
+            limit: 2);
+        return results.Count switch
         {
-            return await _context.Database.CanConnectAsync();
-        }
-
-        // The schema argument is reserved for API parity; SQLite exposes a single main schema.
-        var connection = _context.Database.GetDbConnection();
-        if (connection.State != ConnectionState.Open)
-        {
-            await connection.OpenAsync();
-        }
-
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND lower(name) = lower($name));";
-        var parameter = command.CreateParameter();
-        parameter.ParameterName = "$name";
-        parameter.Value = tableName;
-        command.Parameters.Add(parameter);
-        var scalar = await command.ExecuteScalarAsync();
-        return Convert.ToInt64(scalar) == 1;
+            0 => null,
+            1 => results[0],
+            _ => throw new InvalidOperationException("The query returned more than one element.")
+        };
     }
 
-    /// <inheritdoc/>
-    public async Task EnsureTableAsync()
+    /// <inheritdoc />
+    public Task<T?> GetByIdAsync(string id) =>
+        GetFirstOrDefaultAsync(entity => entity.Id == id);
+
+    /// <inheritdoc />
+    public Task<long> CountAsync(Expression<Func<T, bool>> predicate)
     {
-        if (_tableEnsured)
-        {
-            return;
-        }
-
-        await _ensureTableLock.WaitAsync();
-        try
-        {
-            if (_tableEnsured)
-            {
-                return;
-            }
-
-            if (UsesSqliteProvider)
-            {
-                if (!await TableExistsAsync())
-                {
-                    var creator = _context.GetService<IRelationalDatabaseCreator>();
-                    await creator.CreateTablesAsync();
-                }
-            }
-            else
-            {
-                await _context.Database.EnsureCreatedAsync();
-            }
-
-            _tableEnsured = true;
-        }
-        finally
-        {
-            _ensureTableLock.Release();
-        }
+        ArgumentNullException.ThrowIfNull(predicate);
+        return _sql.CountAsync(predicate, includeDeleted: true);
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
+    public Task<bool> ExistsAsync(Expression<Func<T, bool>> predicate)
+    {
+        ArgumentNullException.ThrowIfNull(predicate);
+        return _sql.ExistsAsync(predicate, includeDeleted: false);
+    }
+
+    /// <inheritdoc />
+    public Task<bool> TableExistsAsync() => _sql.TableExistsAsync(_sql.TableName);
+
+    /// <inheritdoc />
+    public Task<bool> TableExistsAsync(string tableName, string? schema = null) =>
+        _sql.TableExistsAsync(tableName, schema);
+
+    /// <inheritdoc />
+    public Task EnsureTableAsync() => _sql.EnsureTableAsync();
+
+    /// <inheritdoc />
     public async Task InsertAsync(T entity)
     {
         ArgumentNullException.ThrowIfNull(entity);
-        await EnsureTableAsync();
-
         entity.CreatedDateTime = DateTime.UtcNow;
-
-        await DbSet.AddAsync(entity);
-
-        await _context.SaveChangesAsync();
-
-        Logger.LogDebug("Sqlite Insert => Table[{Table}]: {Id}", _tableName, entity.Id);
+        await _sql.InsertAsync(entity);
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public async Task InsertAsync(ICollection<T>? entities)
     {
-        if (entities == null || entities.Count == 0)
+        if (entities is null || entities.Count == 0)
         {
             return;
         }
 
-        await EnsureTableAsync();
-
+        var now = DateTime.UtcNow;
         foreach (var entity in entities)
         {
-            entity.CreatedDateTime = DateTime.UtcNow;
+            entity.CreatedDateTime = now;
         }
 
-        await DbSet.AddRangeAsync(entities);
-
-        await _context.SaveChangesAsync();
-
-        foreach (var entity in entities)
-        {
-            Logger.LogDebug("Sqlite Insert => Table[{Table}]: {Id}", _tableName, entity.Id);
-        }
+        await _sql.InsertManyAsync(entities);
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public async Task UpdateAsync(T entity)
     {
         ArgumentNullException.ThrowIfNull(entity);
-        await EnsureTableAsync();
-
         entity.UpdatedDateTime = DateTime.UtcNow;
-        DbSet.Update(entity);
-
-        await _context.SaveChangesAsync();
-        Logger.LogDebug("Sqlite Update => Table[{Table}]: {Id}", _tableName, entity.Id);
+        await _sql.UpdateAsync(entity);
     }
 
-    /// <inheritdoc/>
-    public async Task UpdateManyAsync(ICollection<T>? entities, Dictionary<string, object> updatedKeyValues)
+    /// <inheritdoc />
+    public async Task UpdateManyAsync(
+        ICollection<T>? entities,
+        Dictionary<string, object> updatedKeyValues)
     {
         ArgumentNullException.ThrowIfNull(updatedKeyValues);
-
-        if (entities == null || entities.Count == 0)
+        if (entities is null || entities.Count == 0)
         {
             return;
         }
 
-        await EnsureTableAsync();
-
-        await using var transaction = await _context.Database.BeginTransactionAsync();
-        try
+        var now = DateTime.UtcNow;
+        foreach (var entity in entities)
         {
-            var utcNow = DateTime.UtcNow;
-            var type = typeof(T);
-            var cachedProps = new Dictionary<string, PropertyInfo?>();
-
-            foreach (var entity in entities)
+            entity.UpdatedDateTime = now;
+            foreach (var (propertyName, value) in updatedKeyValues)
             {
-                entity.UpdatedDateTime = utcNow;
-                foreach (var kv in updatedKeyValues)
+                var property = _sql.TryGetProperty(propertyName);
+                if (property is { CanWrite: true })
                 {
-                    if (!cachedProps.TryGetValue(kv.Key, out var prop))
-                    {
-                        prop = type.GetProperty(kv.Key, BindingFlags.Public | BindingFlags.Instance);
-                        cachedProps[kv.Key] = prop;
-                    }
-                    if (prop?.CanWrite == true)
-                    {
-                        prop.SetValue(entity, kv.Value);
-                    }
+                    property.SetValue(entity, value);
                 }
             }
+        }
 
-            DbSet.UpdateRange(entities);
-
-            await _context.SaveChangesAsync();
-
-            await transaction.CommitAsync();
-
+        await _sql.ExecuteInTransactionAsync(async transaction =>
+        {
             foreach (var entity in entities)
             {
-                Logger.LogDebug("Sqlite Update => Table[{Table}]: {Id}", _tableName, entity.Id);
+                await _sql.UpdateAsync(entity, transaction);
             }
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Error writing to Sqlite: {Message}", ex.Message);
-
-            await transaction.RollbackAsync();
-
-            throw;
-        }
+        });
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public async Task PullAsync<TItem>(
         Expression<Func<T, IEnumerable<TItem>>> field,
         Expression<Func<TItem, bool>>? fieldFilter = null,
         Expression<Func<T, bool>>? documentPredicate = null,
         bool includeDeleted = false)
     {
-        await EnsureTableAsync();
+        ArgumentNullException.ThrowIfNull(field);
+        var entities = await _sql.GetAllAsync(
+            documentPredicate,
+            orderBy: null,
+            descending: false,
+            includeDeleted);
+        var getItems = field.Compile();
+        var filter = fieldFilter?.Compile() ?? (_ => true);
+        var member = StripConvert(field.Body) as MemberExpression;
+        var property = member?.Expression == field.Parameters[0]
+            ? member.Member as PropertyInfo
+            : null;
+        var now = DateTime.UtcNow;
 
-        fieldFilter ??= _ => true;
-        var query = ApplySoftDelete(DbSet.AsQueryable(), includeDeleted);
-        if (documentPredicate != null)
-            {
-                query = query.Where(documentPredicate);
-            }
-
-        var list = await query.ToListAsync();
-        var compiledFilter = fieldFilter.Compile();
-        foreach (var doc in list)
+        await _sql.ExecuteInTransactionAsync(async transaction =>
         {
-            var collection = field.Compile().Invoke(doc);
-            var asList = collection.ToList();
-            var removed = asList.Where(compiledFilter).ToList();
-            foreach (var r in removed)
+            foreach (var entity in entities)
             {
-                asList.Remove(r);
+                var retained = getItems(entity).Where(item => !filter(item)).ToList();
+                if (property is { CanWrite: true } && property.PropertyType.IsAssignableFrom(retained.GetType()))
+                {
+                    property.SetValue(entity, retained);
+                }
+
+                entity.UpdatedDateTime = now;
+                await _sql.UpdateAsync(entity, transaction);
             }
-            var memberExpr = field.Body is UnaryExpression u ? u.Operand as MemberExpression : field.Body as MemberExpression;
-            if (memberExpr?.Member is PropertyInfo { CanWrite: true } pi)
-            {
-                pi.SetValue(doc, asList);
-            }
-        }
-
-        foreach (var doc in list)
-        {
-            doc.UpdatedDateTime = DateTime.UtcNow;
-        }
-
-        DbSet.UpdateRange(list);
-
-        await _context.SaveChangesAsync();
+        });
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public async Task DeleteByIdAsync(string id, bool hardDelete = false)
     {
-        await DeleteOneAsync(x => x.Id == id, hardDelete);
+        var entity = await GetSingleOrDefaultAsync(item => item.Id == id);
+        if (entity is not null)
+        {
+            await DeleteAsync(entity, hardDelete);
+        }
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public async Task DeleteAsync(T entity, bool hardDelete = false)
     {
         ArgumentNullException.ThrowIfNull(entity);
-        await DeleteOneAsync(x => x.Id == entity.Id, hardDelete);
-    }
-
-    /// <inheritdoc/>
-    public async Task DeleteOneAsync(Expression<Func<T, bool>> predicate, bool hardDelete = false)
-    {
-        ArgumentNullException.ThrowIfNull(predicate);
-        await EnsureTableAsync();
-
-        var q = DbSet.Where(predicate);
-        if (!hardDelete)
-        {
-            q = q.Where(x => x.DeletedDateTime == null);
-        }
-
-        var entity = await q.FirstOrDefaultAsync();
-        if (entity == null)
-        {
-            return;
-        }
-
         if (hardDelete)
         {
-            DbSet.Remove(entity);
-            Logger.LogDebug("Sqlite Deleted => Table[{Table}]: {Id}", _tableName, entity.Id);
+            await _sql.DeleteByIdAsync(entity.Id);
         }
         else
         {
             entity.DeletedDateTime = DateTime.UtcNow;
-            DbSet.Update(entity);
-            Logger.LogDebug("Sqlite SoftDeleted => Table[{Table}]: {Id}", _tableName, entity.Id);
+            entity.UpdatedDateTime = entity.DeletedDateTime;
+            await _sql.UpdateAsync(entity);
         }
-
-        await _context.SaveChangesAsync();
     }
 
-    /// <inheritdoc/>
-    public async Task<List<T>> DeleteManyAsync(Expression<Func<T, bool>> predicate, bool hardDelete = false)
+    /// <inheritdoc />
+    public async Task DeleteOneAsync(Expression<Func<T, bool>> predicate, bool hardDelete = false)
     {
         ArgumentNullException.ThrowIfNull(predicate);
-        await EnsureTableAsync();
-
-        var query = DbSet.Where(predicate);
-        if (!hardDelete)
+        var entity = await GetFirstOrDefaultAsync(predicate, includeDeleted: true);
+        if (entity is not null)
         {
-            query = query.Where(x => x.DeletedDateTime == null);
+            await DeleteAsync(entity, hardDelete);
         }
+    }
 
-        var entities = await query.ToListAsync();
+    /// <inheritdoc />
+    public async Task<List<T>> DeleteManyAsync(
+        Expression<Func<T, bool>> predicate,
+        bool hardDelete = false)
+    {
+        ArgumentNullException.ThrowIfNull(predicate);
+        var entities = await _sql.GetAllAsync(
+            predicate,
+            orderBy: null,
+            descending: false,
+            includeDeleted: true);
         if (entities.Count == 0)
         {
-            return entities;
+            return [];
         }
 
-        await using var transaction = await _context.Database.BeginTransactionAsync();
         try
         {
-            if (hardDelete)
+            var now = DateTime.UtcNow;
+            await _sql.ExecuteInTransactionAsync(async transaction =>
             {
-                DbSet.RemoveRange(entities);
-            }
-            else
-            {
-                var utcNow = DateTime.UtcNow;
-                foreach (var e in entities)
+                foreach (var entity in entities)
                 {
-                    e.DeletedDateTime = utcNow;
+                    if (hardDelete)
+                    {
+                        await _sql.DeleteByIdAsync(entity.Id, transaction);
+                    }
+                    else
+                    {
+                        entity.DeletedDateTime = now;
+                        entity.UpdatedDateTime = now;
+                        await _sql.UpdateAsync(entity, transaction);
+                    }
                 }
-
-                DbSet.UpdateRange(entities);
-            }
-
-            await _context.SaveChangesAsync();
-
-            await transaction.CommitAsync();
-
-            foreach (var entity in entities)
-            {
-                Logger.LogDebug(
-                    hardDelete
-                        ? "Sqlite Deleted => Table[{Table}]: {Id}"
-                        : "Sqlite SoftDeleted => Table[{Table}]: {Id}", _tableName, entity.Id);
-            }
-
+            });
             return entities;
         }
-        catch (Exception ex)
+        catch
         {
-            Logger.LogError(ex, "Error in DeleteMany: {Message}", ex.Message);
-
-            await transaction.RollbackAsync();
-
             return [];
         }
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public async Task DeleteManyAsync(ICollection<T> items, bool hardDelete = false)
     {
         ArgumentNullException.ThrowIfNull(items);
-        var ids = items.Select(x => x.Id).ToList();
-
-        await DeleteManyAsync(x => ids.Contains(x.Id), hardDelete);
-    }
-
-    /// <inheritdoc/>
-    public async Task TruncateTableAsync(bool restartIdentity = false, bool cascade = false)
-    {
-        await EnsureTableAsync();
-
-        if (cascade)
-        {
-            Logger.LogDebug("SQLite has no TRUNCATE ... CASCADE; foreign-key cascades follow the schema's ON DELETE rules.");
-        }
-
-        var sql = $"DELETE FROM {QuoteIdentifier(_tableName)};";
-        await _context.Database.ExecuteSqlRawAsync(sql);
-
-        // sqlite_sequence only exists once a table with AUTOINCREMENT has been created;
-        // referencing it while missing is a SQL error, so its presence is checked first.
-        if (restartIdentity && UsesSqliteProvider && await TableExistsAsync("sqlite_sequence"))
-        {
-            var sequenceSql = $"DELETE FROM sqlite_sequence WHERE name = {QuoteLiteral(_tableName)};";
-            await _context.Database.ExecuteSqlRawAsync(sequenceSql);
-        }
-
-        Logger.LogDebug("Truncated table {Table}", _tableName);
-    }
-
-    private static string QuoteLiteral(string value) => $"'{value.Replace("'", "''")}'";
-
-    /// <inheritdoc/>
-    public async Task RestoreAsync(string id)
-    {
-        await EnsureTableAsync();
-
-        var entity = await DbSet.FirstOrDefaultAsync(x => x.Id == id && x.DeletedDateTime != null);
-        if (entity == null)
+        if (items.Count == 0)
         {
             return;
         }
 
-        entity.DeletedDateTime = null;
-        DbSet.Update(entity);
-
-        await _context.SaveChangesAsync();
-
-        Logger.LogDebug("Sqlite Restore => Table[{Table}]: {Id}", _tableName, entity.Id);
+        var now = DateTime.UtcNow;
+        await _sql.ExecuteInTransactionAsync(async transaction =>
+        {
+            foreach (var entity in items)
+            {
+                if (hardDelete)
+                {
+                    await _sql.DeleteByIdAsync(entity.Id, transaction);
+                }
+                else
+                {
+                    entity.DeletedDateTime = now;
+                    entity.UpdatedDateTime = now;
+                    await _sql.UpdateAsync(entity, transaction);
+                }
+            }
+        });
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
+    public Task TruncateTableAsync(bool restartIdentity = false, bool cascade = false) =>
+        _sql.TruncateAsync(restartIdentity, cascade);
+
+    /// <inheritdoc />
+    public async Task RestoreAsync(string id)
+    {
+        var entity = await GetSingleOrDefaultAsync(item => item.Id == id && item.DeletedDateTime != null);
+        if (entity is not null)
+        {
+            await RestoreAsync(entity);
+        }
+    }
+
+    /// <inheritdoc />
     public Task RestoreAsync(T entity)
     {
         ArgumentNullException.ThrowIfNull(entity);
-        return RestoreAsync(entity.Id);
+        entity.DeletedDateTime = null;
+        return UpdateAsync(entity);
     }
 
-    private static IQueryable<T> ApplySoftDelete(IQueryable<T> query, bool includeDeleted)
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
     {
-        if (!includeDeleted)
+        if (_ownsConnection)
         {
-            query = query.Where(x => x.DeletedDateTime == null);
+            await _connection.DisposeAsync();
+        }
+    }
+
+    private static string ValidateConnectionString(string connectionString)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+        return connectionString;
+    }
+
+    private static Expression StripConvert(Expression expression)
+    {
+        while (expression is UnaryExpression { NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked } unary)
+        {
+            expression = unary.Operand;
         }
 
-        return query;
+        return expression;
     }
+
+    // This private shape provides a provider-neutral nameof target while both public
+    // entity interfaces retain their existing namespaces.
+    private interface IPostgresOrSqliteEntity
+    {
+        DateTime CreatedDateTime { get; }
+    }
+}
+
+#if POSTGRES
+/// <summary>Marker interface for PostgreSQL repositories.</summary>
+public interface IPostgresRepository
+#else
+/// <summary>Marker interface for SQLite repositories.</summary>
+public interface ISqliteRepository
+#endif
+{
+}
+
+#if POSTGRES
+/// <summary>Defines the PostgreSQL repository contract for an entity type.</summary>
+/// <typeparam name="T">Entity type.</typeparam>
+public interface IPostgresRepository<T> : IPostgresRepository where T : class, IPostgresEntity
+#else
+/// <summary>Defines the SQLite repository contract for an entity type.</summary>
+/// <typeparam name="T">Entity type.</typeparam>
+public interface ISqliteRepository<T> : ISqliteRepository where T : class, ISqliteEntity
+#endif
+{
+    /// <inheritdoc />
+    Task CreateIndexAsync(Expression<Func<T, object>> field);
+
+    /// <inheritdoc />
+    Task CreateIndexAsync(Expression<Func<T, object>> field, TimeSpan expiresAfter);
+
+    /// <inheritdoc />
+    Task CreateIndexAsync(
+        IEnumerable<Expression<Func<T, object>>> fields,
+        Expression<Func<T, bool>>? filter = null,
+        bool unique = false);
+
+    /// <inheritdoc />
+    Task CreateIndexAsync(
+        IEnumerable<(Expression<Func<T, object>> PropertyExpression, SortDirection Direction)> fields,
+        Expression<Func<T, bool>>? filter = null,
+        bool unique = false);
+
+    /// <inheritdoc />
+    Task RemoveIndexAsync(Expression<Func<T, object>> field);
+
+    /// <inheritdoc />
+    Task RemoveIndexAsync(
+        IEnumerable<Expression<Func<T, object>>> fields,
+        Expression<Func<T, bool>>? filter = null,
+        bool unique = false);
+
+    /// <inheritdoc />
+    Task InsertAsync(T entity);
+
+    /// <inheritdoc />
+    Task InsertAsync(ICollection<T> entities);
+
+    /// <inheritdoc />
+    Task UpdateAsync(T entity);
+
+    /// <inheritdoc />
+    Task UpdateManyAsync(ICollection<T>? entities, Dictionary<string, object> updatedKeyValues);
+
+    /// <inheritdoc />
+    Task PullAsync<TItem>(
+        Expression<Func<T, IEnumerable<TItem>>> field,
+        Expression<Func<TItem, bool>>? fieldFilter = null,
+        Expression<Func<T, bool>>? documentPredicate = null,
+        bool includeDeleted = false);
+
+    /// <inheritdoc />
+    Task DeleteByIdAsync(string id, bool hardDelete = false);
+
+    /// <inheritdoc />
+    Task DeleteAsync(T entity, bool hardDelete = false);
+
+    /// <inheritdoc />
+    Task DeleteOneAsync(Expression<Func<T, bool>> predicate, bool hardDelete = false);
+
+    /// <inheritdoc />
+    Task<List<T>> DeleteManyAsync(Expression<Func<T, bool>> predicate, bool hardDelete = false);
+
+    /// <inheritdoc />
+    Task DeleteManyAsync(ICollection<T> items, bool hardDelete = false);
+
+    /// <inheritdoc />
+    Task TruncateTableAsync(bool restartIdentity = false, bool cascade = false);
+
+    /// <inheritdoc />
+    Task RestoreAsync(T entity);
+
+    /// <inheritdoc />
+    Task RestoreAsync(string id);
+
+    /// <inheritdoc />
+    Task<long> CountAsync(Expression<Func<T, bool>> predicate);
+
+    /// <inheritdoc />
+    Task<bool> ExistsAsync(Expression<Func<T, bool>> predicate);
+
+    /// <inheritdoc />
+    Task<bool> TableExistsAsync();
+
+    /// <inheritdoc />
+    Task<bool> TableExistsAsync(string tableName, string? schema = null);
+
+    /// <inheritdoc />
+    Task EnsureTableAsync();
+
+    /// <inheritdoc />
+    Task<T?> GetByIdAsync(string id);
+
+    /// <inheritdoc />
+    Task<List<T>> GetAllAsync(
+        Expression<Func<T, bool>>? predicate = null,
+        Expression<Func<T, object>>? orderBy = null,
+        SortDirection sortDirection = SortDirection.Ascending,
+        bool includeDeletes = false);
+
+    /// <inheritdoc />
+    Task<List<TProjection>> GetAllAsync<TProjection>(
+        Expression<Func<T, TProjection>> projection,
+        Expression<Func<T, bool>>? predicate = null,
+        bool includeDeletes = false);
+
+    /// <inheritdoc />
+    Task<IPagedList<T>> GetPagedListAsync(
+        int pageIndex = 1,
+        int pageSize = 50,
+        Expression<Func<T, bool>>? predicate = null,
+        Expression<Func<T, object>>? orderBy = null,
+        SortDirection sortDirection = SortDirection.Ascending,
+        bool includeDeletes = false);
+
+    /// <inheritdoc />
+    Task<IPagedList<T>> GetPagedListAsync(
+        int pageIndex,
+        int pageSize,
+        Expression<Func<T, bool>>? predicate,
+        SortExpression<T>[] orderBy,
+        bool includeDeletes = false);
+
+    /// <inheritdoc />
+    Task<T?> GetFirstOrDefaultAsync(
+        Expression<Func<T, bool>>? predicate = null,
+        Expression<Func<T, object>>? orderBy = null,
+        SortDirection sortDirection = SortDirection.Ascending,
+        bool includeDeleted = false);
+
+    /// <inheritdoc />
+    Task<T?> GetSingleOrDefaultAsync(Expression<Func<T, bool>> predicate);
 }

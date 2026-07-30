@@ -8,9 +8,9 @@
     <PackageId>Devspace.Repositories.PostgreSQL</PackageId>
     <Authors>Devspace</Authors>
     <Company>Devspace</Company>
-    <Description>Generic PostgreSQL repository using Entity Framework Core with filtering, paging, soft deletion, and index management.</Description>
+    <Description>Generic PostgreSQL repository using Npgsql/ADO.NET with filtering, paging, soft deletion, and index management.</Description>
     <Copyright>@2026 - Devspace</Copyright>
-    <PackageTags>postgresql;postgres;repository;database;entity-framework-core</PackageTags>
+    <PackageTags>postgresql;postgres;repository;database;ado-net;npgsql</PackageTags>
     <PackageProjectUrl>https://github.com/GVLTodorov/Devspace.Monorepo</PackageProjectUrl>
     <RepositoryUrl>https://github.com/GVLTodorov/Devspace.Monorepo.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
@@ -21,12 +21,11 @@
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <DefineConstants>$(DefineConstants);POSTGRES</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.10" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.10" />
-    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+    <PackageReference Include="Npgsql" Version="10.0.3" />
   </ItemGroup>
 
   <ItemGroup>

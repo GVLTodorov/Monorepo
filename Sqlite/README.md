@@ -1,6 +1,6 @@
 # SQLite repository library
 
-`Sqlite` provides the embedded relational counterpart to the sibling MongoDB and PostgreSQL repositories. It uses Entity Framework Core and Microsoft.Data.Sqlite to expose strongly typed CRUD, audit fields, soft deletion, projection, pagination, collection-value removal, index management, and table lifecycle helpers — against a zero-configuration, file- or memory-backed database.
+`Sqlite` provides the embedded relational counterpart to the sibling MongoDB and PostgreSQL repositories. It uses Microsoft.Data.Sqlite and ADO.NET commands to expose strongly typed CRUD, audit fields, soft deletion, projection, pagination, collection-value removal, index management, and table lifecycle helpers against a zero-configuration, file- or memory-backed database.
 
 For the side-by-side database comparison and solution-wide guidance, see the [root documentation](../README.md).
 
@@ -10,10 +10,10 @@ For the side-by-side database comparison and solution-wide guidance, see the [ro
 |---|---|
 | Target framework | .NET 10 (`net10.0`) |
 | Package and assembly | `Sqlite` |
-| ORM | Entity Framework Core 10.0.10 |
-| Provider | Microsoft.EntityFrameworkCore.Sqlite 10.0.10 |
+| Data layer | ADO.NET; no ORM |
+| Provider | Microsoft.Data.Sqlite.Core 10.0.10 |
 | Identifier | GUID represented as a string, maximum length 64 |
-| Data access | EF Core LINQ expressions |
+| Data access | Parameterized SQL translated from a focused LINQ-expression subset |
 | Table naming | Type or `[TableName]` converted to `snake_case`; trailing `Entity` removed |
 | Audit behavior | Automatic created, updated, deleted, and soft-delete fields |
 
@@ -24,7 +24,7 @@ Choose this library when the application needs an embedded, serverless relationa
 ### Advantages
 
 - Zero infrastructure: no server, no container, no credentials — a single file (or in-memory database).
-- Familiar EF Core and LINQ query model, identical workflow to the PostgreSQL repository.
+- Low-overhead, parameterized SQLite commands with the same expression-based API as PostgreSQL.
 - Consistent CRUD workflow with the MongoDB and PostgreSQL repositories.
 - Built-in audit timestamps, soft delete, restore, projection, and pagination.
 - Simple, unique, compound, and directional index helpers.
@@ -37,8 +37,8 @@ Choose this library when the application needs an embedded, serverless relationa
 - No network access layer: all readers and writers need access to the database file.
 - SQLite has no `TRUNCATE`; `TruncateTableAsync` issues an unfiltered `DELETE` (and resets `sqlite_sequence` when asked).
 - The `cascade` truncate argument is accepted for API parity but ignored; cascades follow the schema's `ON DELETE` rules.
-- Each `SqliteDbContext<T>` models one entity type, so this abstraction is not intended for relationship-rich aggregate graphs.
-- Repository and `DbContext` instances are scoped units of work and are not safe for concurrent use.
+- Each repository maps one entity type, so this abstraction is not intended for relationship-rich aggregate graphs.
+- A repository owns one connection and is not intended for concurrent operations.
 - `PullAsync` loads matching entities, modifies their collection values in memory, and persists them.
 - SQLite has no MongoDB-style TTL index in this API.
 - `[SensitiveData]` is metadata only; it does not encrypt, redact, or omit a value automatically.
@@ -87,18 +87,17 @@ Create a repository directly:
 var repository = new SqliteRepository<UserEntity>("Data Source=application.db");
 ```
 
-For dependency injection, register a scoped context and repository:
+For dependency injection, register a scoped repository:
 
 ```csharp
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Sqlite;
 
-services.AddScoped(_ => new SqliteDbContext<UserEntity>(connectionString));
-services.AddScoped<ISqliteRepository<UserEntity>, SqliteRepository<UserEntity>>();
+services.AddScoped<ISqliteRepository<UserEntity>>(_ =>
+    new SqliteRepository<UserEntity>(connectionString));
 ```
 
-Prefer the context-based constructor when the application controls resource lifetime: disposing the context releases the database file. `Data Source=:memory:` databases live only as long as their connection, so use a shared-cache named connection or supply an externally managed open connection for in-memory scenarios.
+The repository implements `IAsyncDisposable`; use a scope or `await using` to release the database file deterministically. `Data Source=:memory:` databases live only as long as their connection, so keep the repository alive for the database lifetime or supply an externally managed connection.
 
 ## CRUD operations
 
@@ -141,7 +140,7 @@ The update dictionary uses CLR property names. Invalid, unmapped, or incompatibl
 using Sqlite.Helpers;
 
 var admins = await repository.GetAllAsync(
-    predicate: user => user.Roles.Contains("Admin"),
+    predicate: user => user.Email.EndsWith("@example.test"),
     orderBy: user => user.Name,
     sortDirection: SortDirection.Ascending);
 
@@ -180,7 +179,7 @@ Page indexes are one-based. `pageIndex` and `pageSize` must be positive.
 
 ## Projection
 
-SQLite projections are standard LINQ expressions and are translated by EF Core:
+SQLite projections are standard LINQ expressions applied after matching rows are materialized:
 
 ```csharp
 var summaries = await repository.GetAllAsync(
@@ -190,10 +189,10 @@ var summaries = await repository.GetAllAsync(
         user.Name,
         user.Email
     },
-    predicate: user => user.Roles.Contains("Admin"));
+    predicate: user => user.Email.EndsWith("@example.test"));
 ```
 
-Use provider-translatable expressions and project only the columns the caller needs.
+Predicates are translated to parameterized SQL. Entity property comparisons, Boolean composition, null checks, string `StartsWith`/`EndsWith`/`Contains`, and constant-collection `Contains` are supported. Unsupported predicates throw `NotSupportedException`.
 
 ## Remove collection values
 
@@ -204,7 +203,7 @@ await repository.PullAsync(
     documentPredicate: user => user.Email.EndsWith("@example.test"));
 ```
 
-Unlike MongoDB's atomic array operator, this implementation reads matching rows, updates the mapped collection in memory, and saves changes through EF Core. Keep the predicate selective for large tables.
+Unlike MongoDB's atomic array operator, this implementation reads matching rows, updates the mapped collection in memory, and writes changes with parameterized commands. Keep the predicate selective for large tables.
 
 ## Table lifecycle
 
@@ -240,7 +239,7 @@ The directional overload accepts `(property expression, SortDirection)` tuples. 
 
 List, paging, first, projection, and existence operations exclude soft-deleted rows by default. Pass the applicable `includeDeletes` or `includeDeleted` argument when an API provides it and deleted rows must be returned. Restore clears the deletion state; hard delete permanently removes a row.
 
-`CountAsync` and `GetSingleOrDefaultAsync` execute their supplied predicates, so include `!entity.IsDeleted` explicitly when counting or selecting only active records.
+`CountAsync` and `GetSingleOrDefaultAsync` execute their supplied predicates without the default soft-delete filter, so include `entity.DeletedDateTime == null` when selecting only active records.
 
 ## Console demonstration
 
@@ -254,11 +253,11 @@ The sibling console app is a self-checking executable specification. Because SQL
 6. Count, check existence, and run ID, first, single, filtered, sorted, and projected reads.
 7. Run single-field and multi-field pagination with totals and navigation flags.
 8. Update one row and apply a transaction-backed shared update.
-9. Remove temporary tags with EF Core read/modify/write `PullAsync`.
+9. Remove temporary tags with ADO.NET read/modify/write `PullAsync`.
 10. Exercise ID, entity, predicate, and collection deletion workflows.
 11. Verify default soft-delete filtering, include-deleted reads, both restore overloads, and hard deletion.
 12. Remove every demonstration index.
-13. Dispose the context and delete the database file.
+13. Dispose the repository and delete the database file.
 
 The app contains no static connection string or database credential.
 
@@ -283,15 +282,15 @@ dotnet test Sqlite/Sqlite.Tests/Sqlite.Tests.csproj
 dotnet test Sqlite/Sqlite.Tests/Sqlite.Tests.csproj --collect:"XPlat Code Coverage"
 ```
 
-The SQLite suite currently contains 65 passing tests. The latest coverage collection records 100% of production lines and branches for the `Sqlite` assembly (566/566 lines and 198/198 branches).
+The SQLite suite includes ADO.NET repository behavior tests plus entity, expression-helper, paging, attribute, and sorting tests.
 
 Coverage is a safety signal rather than a substitute for meaningful assertions. Preserve behavior-focused tests when extending the API.
 
 ## Operational guidance
 
-- Use one scoped repository/context per unit of work.
-- Await each database operation before starting another on the same context.
-- Prefer the context-based constructor so the application controls when the database file is released.
+- Use one scoped repository per unit of work.
+- Await each database operation before starting another on the same repository.
+- Dispose the repository so the application controls when the database file is released.
 - Enable write-ahead logging (`PRAGMA journal_mode=WAL`) for concurrent-reader workloads.
 - Index fields used by common predicates and sorts, but avoid redundant indexes.
 - Prefer projections and pagination for large data sets.

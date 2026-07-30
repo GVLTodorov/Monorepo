@@ -15,7 +15,7 @@ public static class Program
         await using var postgres = new PostgreSqlBuilder("postgres:15.1").Build();
         await postgres.StartAsync();
 
-        var repository = new PostgresRepository<ExampleEntity>(postgres.GetConnectionString());
+        await using var repository = new PostgresRepository<ExampleEntity>(postgres.GetConnectionString());
 
         ShowMetadata();
         await TableLifecycleAsync(repository);
@@ -130,7 +130,7 @@ public static class Program
                 entity.TestField
             },
             predicate: entity => entity.Category == "Greeting");
-        Check(summaries.Count == 3, "Projection returns only the requested columns");
+        Check(summaries.Count == 3, "Projection returns the requested object shape");
 
         Check(await repository.ExistsAsync(entity => entity.ExternalId == "postgres-004"), "ExistsAsync finds an active row");
 
@@ -199,7 +199,7 @@ public static class Program
 
         var afterPull = await repository.GetAllAsync(
             predicate: entity => entity.Category == "UpdatedBatch");
-        Check(afterPull.All(entity => !entity.Tags.Contains("temporary")), "PullAsync removes collection values through EF Core read/modify/write");
+        Check(afterPull.All(entity => !entity.Tags.Contains("temporary")), "PullAsync removes collection values through ADO.NET read/modify/write");
     }
 
     private static async Task DeleteAndRestoreAsync(

@@ -218,7 +218,9 @@ public class MongoRepository<T> : IMongoRepository<T> where T : class, IMongoEnt
                 .ToListAsync();
         Logger.LogDebug("GetAll Count: {entitiesCount}", entities.Count);
 
-        return entities.ToList();
+        var entityList = entities.ToList();
+
+        return entityList;
     }
 
     /// <inheritdoc/>
@@ -238,7 +240,9 @@ public class MongoRepository<T> : IMongoRepository<T> where T : class, IMongoEnt
             ? entities.AsQueryable().OrderBy(orderByFilter)
             : entities.AsQueryable().OrderByDescending(orderByFilter);
 
-        return results.ToList();
+        var resultList = results.ToList();
+
+        return resultList;
     }
 
     /// <inheritdoc/>
@@ -327,19 +331,26 @@ public class MongoRepository<T> : IMongoRepository<T> where T : class, IMongoEnt
             .Facet(dataFacet)
             .FirstOrDefaultAsync();
 
-        return aggregation.Facets.First(x => x.Name == Data).Output<T>().FirstOrDefault();
+        var entity = aggregation.Facets.First(x => x.Name == Data).Output<T>().FirstOrDefault();
+
+        return entity;
     }
 
     /// <inheritdoc/>
     public async Task<T?> GetSingleOrDefaultAsync(Expression<Func<T, bool>> predicate)
     {
-        return await (await Collection.FindAsync(BuildPredicateAsFilterDefinition(predicate))).SingleOrDefaultAsync();
+        var cursor = await Collection.FindAsync(BuildPredicateAsFilterDefinition(predicate));
+        var entity = await cursor.SingleOrDefaultAsync();
+
+        return entity;
     }
 
     /// <inheritdoc/>
     public async Task<T?> GetByIdAsync(string id)
     {
-        return await GetFirstOrDefaultAsync(p => p.Id == id);
+        var entity = await GetFirstOrDefaultAsync(p => p.Id == id);
+
+        return entity;
     }
 
     /// <inheritdoc/>
@@ -669,7 +680,9 @@ public class MongoRepository<T> : IMongoRepository<T> where T : class, IMongoEnt
             throw new ArgumentNullException(nameof(predicate));
         }
 
-        return await Collection.CountDocumentsAsync(BuildPredicateAsFilterDefinition(predicate));
+        var count = await Collection.CountDocumentsAsync(BuildPredicateAsFilterDefinition(predicate));
+
+        return count;
     }
 
     /// <inheritdoc/>
@@ -857,4 +870,137 @@ public class MongoRepository<T> : IMongoRepository<T> where T : class, IMongoEnt
         [BsonElement("partialFilterExpression")]
         public BsonDocument? PartialFilterExpression { get; set; }
     }
+}
+
+/// <summary>Marker interface for MongoDB repositories.</summary>
+public interface IMongoRepository
+{
+}
+
+/// <summary>Defines the MongoDB repository contract for an entity type.</summary>
+/// <typeparam name="T">Entity type.</typeparam>
+public interface IMongoRepository<T> : IMongoRepository where T : class, IMongoEntity
+{
+    /// <inheritdoc />
+    Task CreateIndexAsync(Expression<Func<T, object>> field);
+
+    /// <inheritdoc />
+    Task CreateIndexAsync(Expression<Func<T, object>> field, TimeSpan expiresAfter);
+
+    /// <inheritdoc />
+    Task CreateIndexAsync(
+        IEnumerable<Expression<Func<T, object>>> fields,
+        Expression<Func<T, bool>>? filter = null,
+        bool unique = false);
+
+    /// <inheritdoc />
+    Task CreateIndexAsync(
+        IEnumerable<(Expression<Func<T, object>> PropertyExpression, SortDirection Direction)> fields,
+        Expression<Func<T, bool>>? filter = null,
+        bool unique = false);
+
+    /// <inheritdoc />
+    Task RemoveIndexAsync(Expression<Func<T, object>> field);
+
+    /// <inheritdoc />
+    Task RemoveIndexAsync(
+        IEnumerable<Expression<Func<T, object>>> fields,
+        Expression<Func<T, bool>>? filter = null,
+        bool unique = false);
+
+    /// <inheritdoc />
+    Task InsertAsync(T entity);
+
+    /// <inheritdoc />
+    Task InsertAsync(ICollection<T> entities);
+
+    /// <inheritdoc />
+    Task UpdateAsync(T entity);
+
+    /// <inheritdoc />
+    Task UpdateManyAsync(ICollection<T>? entities, Dictionary<string, object> updatedKeyValues);
+
+    /// <inheritdoc />
+    Task PullAsync(
+        FieldDefinition<T> field,
+        object value,
+        ICollection<T>? entitiesToBeUpdated = null,
+        Expression<Func<T, object>>? fieldExistsFilter = null);
+
+    /// <inheritdoc />
+    Task PullAsync<TItem>(
+        Expression<Func<T, IEnumerable<TItem>>> field,
+        Expression<Func<TItem, bool>>? fieldFilter = null,
+        Expression<Func<T, bool>>? documentPredicate = null,
+        bool includeDeleted = false);
+
+    /// <inheritdoc />
+    Task DeleteByIdAsync(string id, bool hardDelete = false);
+
+    /// <inheritdoc />
+    Task DeleteAsync(T entity, bool hardDelete = false);
+
+    /// <inheritdoc />
+    Task DeleteOneAsync(Expression<Func<T, bool>> predicate, bool hardDelete = false);
+
+    /// <inheritdoc />
+    Task<List<T>> DeleteManyAsync(Expression<Func<T, bool>> predicate, bool hardDelete = false);
+
+    /// <inheritdoc />
+    Task DeleteManyAsync(ICollection<T> items, bool hardDelete = false);
+
+    /// <inheritdoc />
+    Task RestoreAsync(T entity);
+
+    /// <inheritdoc />
+    Task RestoreAsync(string id);
+
+    /// <inheritdoc />
+    Task<long> CountAsync(Expression<Func<T, bool>> predicate);
+
+    /// <inheritdoc />
+    Task<bool> ExistsAsync(Expression<Func<T, bool>> predicate);
+
+    /// <inheritdoc />
+    Task<T?> GetByIdAsync(string id);
+
+    /// <inheritdoc />
+    Task<List<T>> GetAllAsync(
+        Expression<Func<T, bool>>? predicate = null,
+        Expression<Func<T, object>>? orderBy = null,
+        SortDirection sortDirection = SortDirection.Ascending,
+        bool includeDeletes = false);
+
+    /// <inheritdoc />
+    Task<List<TProjection>> GetAllAsync<TProjection>(
+        ProjectionDefinition<T, TProjection> projection,
+        Expression<Func<T, bool>>? predicate = null,
+        bool includeDeletes = false);
+
+    /// <inheritdoc />
+    Task<IPagedList<T>> GetPagedListAsync(
+        int pageIndex = 1,
+        int pageSize = 50,
+        Expression<Func<T, bool>>? predicate = null,
+        Expression<Func<T, object>>? orderBy = null,
+        SortDirection sortDirection = SortDirection.Ascending,
+        bool includeDeletes = false);
+
+    /// <inheritdoc />
+    Task<IPagedList<T>> GetPagedListAsync(
+        int pageIndex,
+        int pageSize,
+        Expression<Func<T, bool>>? predicate,
+        SortExpression<T>[] orderBy,
+        bool includeDeletes = false);
+
+    /// <inheritdoc />
+    Task<T?> GetFirstOrDefaultAsync(
+        Expression<Func<T, bool>>? predicate = null,
+        Expression<Func<T, object>>? orderBy = null,
+        SortDirection sortDirection = SortDirection.Ascending,
+        bool includeDeleted = false);
+
+    /// <inheritdoc />
+    Task<T?> GetSingleOrDefaultAsync(Expression<Func<T, bool>> predicate);
 }

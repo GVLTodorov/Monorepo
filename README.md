@@ -56,7 +56,7 @@ All nine projects target `net10.0`. The three library projects are packable and 
 | Nested objects and arrays are central to the model | Foreign keys, constraints, and relational integrity are important | Desktop, mobile, CLI, or offline-first workloads dominate |
 | Native document TTL indexes are required | Multi-row ACID transactions are a primary requirement | A single writer with in-process access is sufficient |
 | The workload naturally maps to document access patterns | SQL reporting, joins, and established relational tooling matter | Local caches, prototypes, and tests should run without a server |
-| Horizontal document distribution is expected | Complex relational querying and EF Core integration are preferred | Deployment must avoid external database infrastructure |
+| Horizontal document distribution is expected | Complex relational querying and ADO.NET control are preferred | Deployment must avoid external database infrastructure |
 
 The repository APIs reduce application-level differences, but they do not make the databases interchangeable. Schema design, indexing, transaction behavior, query translation, and deployment topology must still be designed for the selected provider.
 
@@ -64,7 +64,7 @@ The repository APIs reduce application-level differences, but they do not make t
 
 | Capability | Mongo | Postgres | Sqlite |
 |---|---:|---:|---:|
-| Strongly typed predicates | Yes | Yes, translated by EF Core | Yes, translated by EF Core |
+| Strongly typed predicates | Yes | Yes, translated to parameterized SQL | Yes, translated to parameterized SQL |
 | Single and bulk insert | Yes | Yes | Yes |
 | Single and bulk update | Yes | Yes | Yes |
 | Soft and hard delete | Yes | Yes | Yes |
@@ -72,13 +72,13 @@ The repository APIs reduce application-level differences, but they do not make t
 | Projection | MongoDB `ProjectionDefinition` | LINQ expression | LINQ expression |
 | One- and multi-column sorting | Yes | Yes | Yes |
 | Pagination metadata | Yes | Yes | Yes |
-| Collection item removal | Native MongoDB pull operation | EF Core read/modify/write | EF Core read/modify/write |
+| Collection item removal | Native MongoDB pull operation | ADO.NET read/modify/write | ADO.NET read/modify/write |
 | Simple, compound, directional, and unique indexes | Yes | Yes | Yes |
 | Partial indexes | Yes | Not implemented; the current filter argument is reserved | Not implemented; the current filter argument is reserved |
 | TTL indexes | Native | Not native; the TTL overload creates a normal index | Not native; the TTL overload creates a normal index |
 | Automatic storage creation | MongoDB creates collections on first write | Repository can ensure the mapped table exists | Repository can ensure the mapped table exists |
 | Table truncation | Not applicable | Yes, with identity restart and cascade options | `DELETE`-based reset with `sqlite_sequence` restart; cascade not applicable |
-| Provider-level transactions for bulk mutation | Requires a transaction-capable MongoDB deployment | Relational EF Core transaction | Relational EF Core transaction |
+| Provider-level transactions for bulk mutation | Requires a transaction-capable MongoDB deployment | ADO.NET transaction | ADO.NET transaction |
 | External infrastructure | MongoDB deployment | PostgreSQL server | None; embedded file or in-memory database |
 
 ## Mongo library
@@ -298,8 +298,8 @@ For a focused provider reference, see [Mongo/Mongo/README.md](Mongo/Mongo/README
 | Project | `Postgres/Postgres/Postgres.csproj` |
 | Assembly and package ID | `Postgres` |
 | Target framework | `.NET 10` |
-| ORM | `Microsoft.EntityFrameworkCore 10.0.10` |
-| Provider | `Npgsql.EntityFrameworkCore.PostgreSQL 10.0.3` |
+| Data access | ADO.NET; no ORM |
+| Provider | `Npgsql 10.0.3` |
 | Entity contract | `IPostgresEntity` |
 | Base entity | `PostgresEntity` |
 | Repository contract | `IPostgresRepository<T>` |
@@ -336,7 +336,7 @@ The mapped table name is `application_users`. `PostgresEntity` supplies the same
 
 ### Create a repository
 
-The direct connection-string constructor is convenient for small tools:
+The connection-string constructor is convenient for small tools:
 
 ```csharp
 using Postgres;
@@ -348,19 +348,18 @@ IPostgresRepository<UserEntity> users =
     new PostgresRepository<UserEntity>(connectionString);
 ```
 
-For hosted applications, prefer dependency injection and a scoped context:
+For hosted applications, register a scoped repository:
 
 ```csharp
-using Microsoft.EntityFrameworkCore;
 using Postgres;
 
-services.AddDbContext<PostgresDbContext<UserEntity>>(options =>
-    options.UseNpgsql(configuration.GetConnectionString("Postgres")));
-
-services.AddScoped<IPostgresRepository<UserEntity>, PostgresRepository<UserEntity>>();
+services.AddScoped<IPostgresRepository<UserEntity>>(_ =>
+    new PostgresRepository<UserEntity>(
+        configuration.GetConnectionString("Postgres")
+        ?? throw new InvalidOperationException("Postgres connection string is missing.")));
 ```
 
-`DbContext` is not thread-safe. Use a scoped repository/context per request or unit of work, and never execute concurrent operations through the same instance.
+The repository owns one provider connection and is not intended for concurrent operations. Scope it to a request or unit of work; dependency injection disposes the asynchronous repository at the end of the scope.
 
 ### CRUD and query example
 
@@ -393,7 +392,7 @@ using Postgres.Helpers;
 
 var summaries = await users.GetAllAsync(
     projection: x => new { x.Id, x.Name, x.Email },
-    predicate: x => x.Roles.Contains("Administrator"));
+    predicate: x => x.Email.EndsWith("@example.com"));
 
 var page = await users.GetPagedListAsync(
     pageIndex: 1,
@@ -404,12 +403,13 @@ var page = await users.GetPagedListAsync(
     includeDeletes: false);
 ```
 
-Predicates and projections must be translatable by the configured EF Core provider. Translation failures are reported at query execution time.
+Predicates are translated to parameterized SQL. Entity property comparisons, Boolean composition, null checks, string `StartsWith`/`EndsWith`/`Contains`, and constant-collection `Contains` are supported. Projections run in memory after the matching rows are materialized; unsupported predicates throw `NotSupportedException`.
 
 ### Bulk and collection operations
 
 ```csharp
-var selectedUsers = await users.GetAllAsync(x => x.Roles.Contains("Member"));
+var selectedUsers = await users.GetAllAsync(
+    predicate: x => x.Email.EndsWith("@example.com"));
 
 await users.UpdateManyAsync(
     selectedUsers,
@@ -451,7 +451,7 @@ await users.RemoveIndexAsync(fields);
 await users.TruncateTableAsync(restartIdentity: true, cascade: false);
 ```
 
-`EnsureTableAsync` is useful for demos and isolated tools. Production systems should normally use reviewed EF Core migrations so schema changes are explicit, versioned, and deployable independently.
+`EnsureTableAsync` is useful for demos and isolated tools. Production systems should normally use reviewed, versioned SQL migration scripts so schema changes remain explicit and deployable independently.
 
 PostgreSQL has no native MongoDB-style TTL index. The `expiresAfter` overload creates a normal index; automated expiry requires an application job, database scheduler, or another retention mechanism.
 
@@ -459,15 +459,15 @@ PostgreSQL has no native MongoDB-style TTL index. The `expiresAfter` overload cr
 
 - Strong relational integrity, constraints, and transactional semantics.
 - Excellent SQL tooling and reporting ecosystem.
-- EF Core change tracking and LINQ integration.
+- Low-overhead, parameterized ADO.NET access through Npgsql.
 - Natural support for relational modeling and joins.
 - Transaction-backed bulk mutation paths in the repository.
 
 ### Postgres tradeoffs
 
 - Schema changes require disciplined migration management.
-- EF Core query translation limits which .NET expressions can execute server-side.
-- `DbContext` and the repository instance are not thread-safe.
+- The built-in SQL translator intentionally supports a focused subset of .NET expressions.
+- A repository instance owns one connection and is not intended for concurrent use.
 - Collection pulling is less efficient than MongoDB's native array update operator.
 - TTL behavior is not native, and partial-index filter translation is not implemented by this repository.
 
@@ -482,8 +482,8 @@ For a focused provider reference, see [Postgres/README.md](Postgres/README.md).
 | Project | `Sqlite/Sqlite/Sqlite.csproj` |
 | Assembly and package ID | `Sqlite` |
 | Target framework | `.NET 10` |
-| ORM | `Microsoft.EntityFrameworkCore 10.0.10` |
-| Provider | `Microsoft.EntityFrameworkCore.Sqlite 10.0.10` |
+| Data access | ADO.NET; no ORM |
+| Provider | `Microsoft.Data.Sqlite.Core 10.0.10` |
 | Entity contract | `ISqliteEntity` |
 | Base entity | `SqliteEntity` |
 | Repository contract | `ISqliteRepository<T>` |
@@ -520,7 +520,7 @@ The mapped table name is `application_users`. `SqliteEntity` supplies the same a
 
 ### Create a repository
 
-The direct connection-string constructor is convenient for small tools:
+The connection-string constructor is convenient for small tools:
 
 ```csharp
 using Sqlite;
@@ -529,19 +529,18 @@ ISqliteRepository<UserEntity> users =
     new SqliteRepository<UserEntity>("Data Source=application.db");
 ```
 
-For hosted applications, prefer dependency injection and a scoped context:
+For hosted applications, register a scoped repository:
 
 ```csharp
-using Microsoft.EntityFrameworkCore;
 using Sqlite;
 
-services.AddDbContext<SqliteDbContext<UserEntity>>(options =>
-    options.UseSqlite(configuration.GetConnectionString("Sqlite")));
-
-services.AddScoped<ISqliteRepository<UserEntity>, SqliteRepository<UserEntity>>();
+services.AddScoped<ISqliteRepository<UserEntity>>(_ =>
+    new SqliteRepository<UserEntity>(
+        configuration.GetConnectionString("Sqlite")
+        ?? throw new InvalidOperationException("Sqlite connection string is missing.")));
 ```
 
-`DbContext` is not thread-safe. Use a scoped repository/context per request or unit of work, and never execute concurrent operations through the same instance. Prefer the context-based constructor when the application must release the database file deterministically.
+The repository owns one SQLite connection and implements `IAsyncDisposable`. Scope it to a request or unit of work, or use `await using` when deterministic file release is required.
 
 ### CRUD, queries, and workflows
 
@@ -576,7 +575,7 @@ await users.TruncateTableAsync(restartIdentity: true);
 
 - Zero infrastructure: embedded, serverless, and credential-free.
 - Single-file databases that are trivial to back up, copy, and ship.
-- Familiar EF Core change tracking and LINQ integration.
+- Low-overhead, parameterized ADO.NET access through Microsoft.Data.Sqlite.
 - Ideal for tests, demos, desktop or mobile apps, and offline-first workloads.
 - Transaction-backed bulk mutation paths in the repository.
 
@@ -712,7 +711,7 @@ The application is a self-checking executable specification. Every successful be
 7. Count, existence, ID lookup, first-or-default, single-or-default, filtered lists, sorting, and LINQ projection.
 8. Single-field and multi-field pagination, totals, and navigation flags.
 9. Single update and transaction-backed `UpdateManyAsync`.
-10. Collection-value removal through EF Core read/modify/write `PullAsync`.
+10. Collection-value removal through ADO.NET read/modify/write `PullAsync`.
 11. Soft deletion through ID, entity, predicate, and collection workflows.
 12. Default soft-delete filtering and opt-in reads with `includeDeletes: true`.
 13. Restore by ID and entity.
@@ -747,13 +746,13 @@ The application is a self-checking executable specification. Every successful be
 7. Count, existence, ID lookup, first-or-default, single-or-default, filtered lists, sorting, and LINQ projection.
 8. Single-field and multi-field pagination, totals, and navigation flags.
 9. Single update and transaction-backed `UpdateManyAsync`.
-10. Collection-value removal through EF Core read/modify/write `PullAsync`.
+10. Collection-value removal through ADO.NET read/modify/write `PullAsync`.
 11. Soft deletion through ID, entity, predicate, and collection workflows.
 12. Default soft-delete filtering and opt-in reads with `includeDeletes: true`.
 13. Restore by ID and entity.
 14. Permanent deletion through the single and bulk APIs.
 15. Removal of every demonstration index.
-16. Disposal of the context and deletion of the database file.
+16. Disposal of the repository and deletion of the database file.
 
 The console applications are demonstrations, not benchmarks. Image tags are pinned for repeatability; update them deliberately after validating database compatibility.
 
@@ -791,7 +790,7 @@ dotnet test Sqlite/Sqlite.Tests/Sqlite.Tests.csproj `
   --collect:"XPlat Code Coverage"
 ```
 
-The test suites use process-local SQLite and EF Core InMemory providers to cover repository behavior and provider routing without requiring an external database or Docker.
+The relational test suites use process-local SQLite connections to cover ADO.NET behavior without requiring an external database or Docker.
 
 ## Technical specifications
 
@@ -799,24 +798,23 @@ The test suites use process-local SQLite and EF Core InMemory providers to cover
 |---|---:|
 | .NET target framework | 10.0 |
 | MongoDB.Driver / MongoDB.Bson | 3.10.0 |
-| Entity Framework Core | 10.0.10 |
-| Npgsql EF Core provider | 10.0.3 |
-| SQLite EF Core provider | 10.0.10 |
+| Npgsql | 10.0.3 |
+| Microsoft.Data.Sqlite.Core | 10.0.10 |
 | Testcontainers MongoDB / PostgreSQL | 4.13.0 |
 | NUnit | 4.6.1 |
 | NUnit3TestAdapter | 6.2.0 |
 | Microsoft.NET.Test.Sdk | 18.8.1 |
 | coverlet.collector | 10.0.1 |
 
-At the time of the latest dependency audit, NuGet reported no outdated direct packages and no known vulnerable direct or transitive packages.
+At the time of the latest dependency audit, NuGet reported no outdated top-level packages and no known vulnerable top-level or transitive packages.
 
 ## Production guidance
 
 ### Dependency injection and lifetimes
 
 - Reuse `MongoClient`; it is designed to be long-lived and manages connection pooling.
-- Scope `PostgresDbContext<T>`/`PostgresRepository<T>` and `SqliteDbContext<T>`/`SqliteRepository<T>` to one request or unit of work.
-- Do not share an EF Core repository/context between threads.
+- Scope `PostgresRepository<T>` and `SqliteRepository<T>` to one request or unit of work.
+- Do not execute concurrent commands through the same relational repository instance.
 - Prefer constructor injection through `IMongoRepository<T>`, `IPostgresRepository<T>`, or `ISqliteRepository<T>`.
 
 ### Secrets
@@ -848,7 +846,7 @@ At the time of the latest dependency audit, NuGet reported no outdated direct pa
 - SQLite truncation is an unfiltered `DELETE`; the `cascade` argument is accepted for parity and ignored.
 - SQLite serializes concurrent writes and offers no network access layer.
 - `SensitiveDataAttribute` does not perform protection automatically.
-- The generic PostgreSQL and SQLite contexts model one entity type per closed generic context.
+- Each generic PostgreSQL and SQLite repository maps one entity type.
 - Runtime table creation is useful for demos but is not a replacement for production migrations.
 - The Mongo and Postgres console applications require Docker and cannot run while the Docker engine is unavailable; the Sqlite console application has no such requirement.
 

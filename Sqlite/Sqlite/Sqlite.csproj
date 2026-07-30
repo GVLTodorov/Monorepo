@@ -8,9 +8,9 @@
     <PackageId>Devspace.Repositories.SQLite</PackageId>
     <Authors>Devspace</Authors>
     <Company>Devspace</Company>
-    <Description>Generic SQLite repository using Entity Framework Core with filtering, paging, soft deletion, and index management.</Description>
+    <Description>Generic SQLite repository using Microsoft.Data.Sqlite/ADO.NET with filtering, paging, soft deletion, and index management.</Description>
     <Copyright>@2026 - Devspace</Copyright>
-    <PackageTags>sqlite;repository;database;entity-framework-core;embedded</PackageTags>
+    <PackageTags>sqlite;repository;database;ado-net;embedded</PackageTags>
     <PackageProjectUrl>https://github.com/GVLTodorov/Devspace.Monorepo</PackageProjectUrl>
     <RepositoryUrl>https://github.com/GVLTodorov/Devspace.Monorepo.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
@@ -24,10 +24,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.10" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.10" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.10" />
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.10" />
     <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="3.53.3" />
+    <PackageReference Include="SQLitePCLRaw.provider.e_sqlite3" Version="2.1.11" />
   </ItemGroup>
 
   <ItemGroup>
