@@ -74,17 +74,14 @@ jobs:
             echo "# Benchmark results"
             echo
             echo "Runner: ubuntu-latest, commit ${{ github.sha }}"
-            for project in Mongo/Mongo.Benchmark Postgres/Postgres.Benchmark Sqlite/Sqlite.Benchmark; do
-              report="$project/BenchmarkDotNet.Artifacts/results/$(basename "$project").RepositoryBenchmarks-report-github.md"
+            for assembly in Mongo.Benchmark Postgres.Benchmark Sqlite.Benchmark; do
+              report="BenchmarkDotNet.Artifacts/results/$assembly.RepositoryBenchmarks-report-github.md"
+              echo
+              echo "## $assembly"
+              echo
               if [[ -f "$report" ]]; then
-                echo
-                echo "## ${project#*/}"
-                echo
                 cat "$report"
               else
-                echo
-                echo "## ${project#*/}"
-                echo
                 echo "_No report found at $report_"
               fi
             done
