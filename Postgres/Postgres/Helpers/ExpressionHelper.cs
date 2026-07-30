@@ -35,6 +35,7 @@ public static class ExpressionHelper
         if (value == null) return null;
         var memberName = GetMemberName(expression);
         var property = value.GetType().GetProperty(memberName);
+
         return property?.GetValue(value);
     }
 

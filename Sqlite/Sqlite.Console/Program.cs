@@ -303,7 +303,7 @@ public static class Program
         List<string> tags,
         DateTime expiry)
     {
-        return new ExampleEntity
+        var exampleEntity = new ExampleEntity
         {
             ExternalId = externalId,
             TestField = testField,
@@ -313,6 +313,8 @@ public static class Program
             ExpiresAtUtc = expiry,
             SecretNote = "This value is deliberately never printed."
         };
+
+        return exampleEntity;
     }
 
     private static void Banner(string title)

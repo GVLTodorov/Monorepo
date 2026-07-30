@@ -611,6 +611,7 @@ public sealed class MongoRepositoryCoverageTests
             .ReturnsAsync(true)
             .ReturnsAsync(false);
         cursor.SetupGet(value => value.Current).Returns(values);
+
         return cursor.Object;
     }
 

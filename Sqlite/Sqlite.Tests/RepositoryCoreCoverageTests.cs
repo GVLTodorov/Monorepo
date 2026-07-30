@@ -515,6 +515,7 @@ public sealed class RepositoryCoreCoverageTests
             .GetType($"{RepositoryNamespace}.SqliteRepositoryCore`1", throwOnError: true)!
             .MakeGenericType(typeof(CoverageRecord));
         var dialect = Enum.Parse(dialectType, dialectName);
+
         return Activator.CreateInstance(
             coreType,
             BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
@@ -576,6 +577,7 @@ public sealed class RepositoryCoreCoverageTests
         var values = parameters.Cast<object>()
             .Select(parameter => parameter.GetType().GetProperty("Value")!.GetValue(parameter))
             .ToArray();
+
         return (sql, values);
     }
 
@@ -585,6 +587,7 @@ public sealed class RepositoryCoreCoverageTests
         var comparison = value
             ? Expression.Equal(Expression.Constant(1), Expression.Constant(1))
             : Expression.NotEqual(Expression.Constant(1), Expression.Constant(1));
+
         return Expression.Lambda<Func<CoverageRecord, bool>>(comparison, parameter);
     }
 
@@ -593,6 +596,7 @@ public sealed class RepositoryCoreCoverageTests
         var parameter = Expression.Parameter(typeof(CoverageRecord), "record");
         var member = Expression.Property(parameter, nameof(CoverageRecord.NullableInt));
         var comparison = Expression.GreaterThan(member, Expression.Constant(null, typeof(int?)));
+
         return Expression.Lambda<Func<CoverageRecord, bool>>(comparison, parameter);
     }
 
@@ -600,6 +604,7 @@ public sealed class RepositoryCoreCoverageTests
     {
         var parameter = Expression.Parameter(typeof(CoverageRecord), "record");
         var member = Expression.Property(parameter, nameof(CoverageRecord.BoolValue));
+
         return Expression.Lambda<Func<CoverageRecord, bool>>(
             Expression.ExclusiveOr(member, Expression.Constant(true)),
             parameter);
@@ -608,6 +613,7 @@ public sealed class RepositoryCoreCoverageTests
     private static Expression<Func<CoverageRecord, bool>> UnsupportedTopLevelExpression()
     {
         var parameter = Expression.Parameter(typeof(CoverageRecord), "record");
+
         return Expression.Lambda<Func<CoverageRecord, bool>>(
             Expression.Block(Expression.Constant(true)),
             parameter);

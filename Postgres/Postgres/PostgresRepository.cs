@@ -49,21 +49,23 @@ public class PostgresRepository<T> : IPostgresRepository<T>, IAsyncDisposable
     {
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="CreateIndexAsync(Expression{Func{T, object}})" />
     public Task CreateIndexAsync(Expression<Func<T, object>> field)
     {
         ArgumentNullException.ThrowIfNull(field);
+
         return CreateIndexAsync([field]);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="CreateIndexAsync(Expression{Func{T, object}}, TimeSpan)" />
     public Task CreateIndexAsync(Expression<Func<T, object>> field, TimeSpan expiresAfter)
     {
         ArgumentNullException.ThrowIfNull(field);
+
         return CreateIndexAsync(field);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="CreateIndexAsync(IEnumerable{Expression{Func{T, object}}}, Expression{Func{T, bool}}, bool)" />
     public Task CreateIndexAsync(
         IEnumerable<Expression<Func<T, object>>> fields,
         Expression<Func<T, bool>>? filter = null,
@@ -81,7 +83,7 @@ public class PostgresRepository<T> : IPostgresRepository<T>, IAsyncDisposable
         return _sql.CreateIndexAsync(items, unique);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="CreateIndexAsync(IEnumerable{ValueTuple{Expression{Func{T, object}}, SortDirection}}, Expression{Func{T, bool}}, bool)" />
     public Task CreateIndexAsync(
         IEnumerable<(Expression<Func<T, object>> PropertyExpression, SortDirection Direction)> fields,
         Expression<Func<T, bool>>? filter = null,
@@ -101,14 +103,15 @@ public class PostgresRepository<T> : IPostgresRepository<T>, IAsyncDisposable
         return _sql.CreateIndexAsync(items, unique);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="RemoveIndexAsync(Expression{Func{T, object}})" />
     public Task RemoveIndexAsync(Expression<Func<T, object>> field)
     {
         ArgumentNullException.ThrowIfNull(field);
+
         return _sql.RemoveIndexAsync([_sql.GetMemberName(field)]);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="RemoveIndexAsync(IEnumerable{Expression{Func{T, object}}}, Expression{Func{T, bool}}, bool)" />
     public Task RemoveIndexAsync(
         IEnumerable<Expression<Func<T, object>>> fields,
         Expression<Func<T, bool>>? filter = null,
@@ -124,7 +127,7 @@ public class PostgresRepository<T> : IPostgresRepository<T>, IAsyncDisposable
         return _sql.RemoveIndexAsync(names);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="GetAllAsync(Expression{Func{T, bool}}, Expression{Func{T, object}}, SortDirection, bool)" />
     public Task<List<T>> GetAllAsync(
         Expression<Func<T, bool>>? predicate = null,
         Expression<Func<T, object>>? orderBy = null,
@@ -136,7 +139,7 @@ public class PostgresRepository<T> : IPostgresRepository<T>, IAsyncDisposable
             sortDirection == SortDirection.Descending,
             includeDeletes);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="GetAllAsync{TProjection}(Expression{Func{T, TProjection}}, Expression{Func{T, bool}}, bool)" />
     public async Task<List<TProjection>> GetAllAsync<TProjection>(
         Expression<Func<T, TProjection>> projection,
         Expression<Func<T, bool>>? predicate = null,
@@ -153,7 +156,7 @@ public class PostgresRepository<T> : IPostgresRepository<T>, IAsyncDisposable
         return projectedEntities;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="GetPagedListAsync(int, int, Expression{Func{T, bool}}, Expression{Func{T, object}}, SortDirection, bool)" />
     public Task<IPagedList<T>> GetPagedListAsync(
         int pageIndex = 1,
         int pageSize = 50,
@@ -168,10 +171,11 @@ public class PostgresRepository<T> : IPostgresRepository<T>, IAsyncDisposable
                 orderBy is null ? nameof(IPostgresOrSqliteEntity.CreatedDateTime) : _sql.GetMemberName(orderBy),
                 sortDirection == SortDirection.Descending)
         };
+
         return GetPagedListCoreAsync(pageIndex, pageSize, predicate, ordering, includeDeletes);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="GetPagedListAsync(int, int, Expression{Func{T, bool}}, SortExpression{T}[], bool)" />
     public Task<IPagedList<T>> GetPagedListAsync(
         int pageIndex,
         int pageSize,
@@ -184,6 +188,7 @@ public class PostgresRepository<T> : IPostgresRepository<T>, IAsyncDisposable
                 _sql.GetMemberName(item.Expression),
                 item.SortDirection == SortDirection.Descending)).ToArray()
             : [(nameof(IPostgresOrSqliteEntity.CreatedDateTime), false)];
+
         return GetPagedListCoreAsync(pageIndex, pageSize, predicate, ordering, includeDeletes);
     }
 
@@ -206,10 +211,12 @@ public class PostgresRepository<T> : IPostgresRepository<T>, IAsyncDisposable
             offset: (pageIndex - 1) * pageSize,
             limit: pageSize);
         var totalPages = totalCount == 0 ? 0 : (long)Math.Ceiling((double)totalCount / pageSize);
-        return new PagedList<T>(items, pageIndex, pageSize, totalPages, totalCount);
+        var pagedList = new PagedList<T>(items, pageIndex, pageSize, totalPages, totalCount);
+
+        return pagedList;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="GetFirstOrDefaultAsync(Expression{Func{T, bool}}, Expression{Func{T, object}}, SortDirection, bool)" />
     public async Task<T?> GetFirstOrDefaultAsync(
         Expression<Func<T, bool>>? predicate = null,
         Expression<Func<T, object>>? orderBy = null,
@@ -227,7 +234,7 @@ public class PostgresRepository<T> : IPostgresRepository<T>, IAsyncDisposable
         return firstResult;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="GetSingleOrDefaultAsync(Expression{Func{T, bool}})" />
     public async Task<T?> GetSingleOrDefaultAsync(Expression<Func<T, bool>> predicate)
     {
         ArgumentNullException.ThrowIfNull(predicate);
@@ -237,6 +244,7 @@ public class PostgresRepository<T> : IPostgresRepository<T>, IAsyncDisposable
             descending: false,
             includeDeleted: true,
             limit: 2);
+
         return results.Count switch
         {
             0 => null,
@@ -245,35 +253,37 @@ public class PostgresRepository<T> : IPostgresRepository<T>, IAsyncDisposable
         };
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="GetByIdAsync(string)" />
     public Task<T?> GetByIdAsync(string id) =>
         GetFirstOrDefaultAsync(entity => entity.Id == id);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="CountAsync(Expression{Func{T, bool}})" />
     public Task<long> CountAsync(Expression<Func<T, bool>> predicate)
     {
         ArgumentNullException.ThrowIfNull(predicate);
+
         return _sql.CountAsync(predicate, includeDeleted: true);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="ExistsAsync(Expression{Func{T, bool}})" />
     public Task<bool> ExistsAsync(Expression<Func<T, bool>> predicate)
     {
         ArgumentNullException.ThrowIfNull(predicate);
+
         return _sql.ExistsAsync(predicate, includeDeleted: false);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="TableExistsAsync()" />
     public Task<bool> TableExistsAsync() => _sql.TableExistsAsync(_sql.TableName);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="TableExistsAsync(string, string)" />
     public Task<bool> TableExistsAsync(string tableName, string? schema = null) =>
         _sql.TableExistsAsync(tableName, schema);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="EnsureTableAsync()" />
     public Task EnsureTableAsync() => _sql.EnsureTableAsync();
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="InsertAsync(T)" />
     public async Task InsertAsync(T entity)
     {
         ArgumentNullException.ThrowIfNull(entity);
@@ -281,7 +291,7 @@ public class PostgresRepository<T> : IPostgresRepository<T>, IAsyncDisposable
         await _sql.InsertAsync(entity);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="InsertAsync(ICollection{T})" />
     public async Task InsertAsync(ICollection<T>? entities)
     {
         if (entities is null || entities.Count == 0)
@@ -298,7 +308,7 @@ public class PostgresRepository<T> : IPostgresRepository<T>, IAsyncDisposable
         await _sql.InsertManyAsync(entities);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="UpdateAsync(T)" />
     public async Task UpdateAsync(T entity)
     {
         ArgumentNullException.ThrowIfNull(entity);
@@ -306,7 +316,7 @@ public class PostgresRepository<T> : IPostgresRepository<T>, IAsyncDisposable
         await _sql.UpdateAsync(entity);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="UpdateManyAsync(ICollection{T}, Dictionary{string, object})" />
     public async Task UpdateManyAsync(
         ICollection<T>? entities,
         Dictionary<string, object> updatedKeyValues)
@@ -340,7 +350,7 @@ public class PostgresRepository<T> : IPostgresRepository<T>, IAsyncDisposable
         });
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="PullAsync{TItem}(Expression{Func{T, IEnumerable{TItem}}}, Expression{Func{TItem, bool}}, Expression{Func{T, bool}}, bool)" />
     public async Task PullAsync<TItem>(
         Expression<Func<T, IEnumerable<TItem>>> field,
         Expression<Func<TItem, bool>>? fieldFilter = null,
@@ -377,7 +387,7 @@ public class PostgresRepository<T> : IPostgresRepository<T>, IAsyncDisposable
         });
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="DeleteByIdAsync(string, bool)" />
     public async Task DeleteByIdAsync(string id, bool hardDelete = false)
     {
         var entity = await GetSingleOrDefaultAsync(item => item.Id == id);
@@ -387,7 +397,7 @@ public class PostgresRepository<T> : IPostgresRepository<T>, IAsyncDisposable
         }
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="DeleteAsync(T, bool)" />
     public async Task DeleteAsync(T entity, bool hardDelete = false)
     {
         ArgumentNullException.ThrowIfNull(entity);
@@ -403,7 +413,7 @@ public class PostgresRepository<T> : IPostgresRepository<T>, IAsyncDisposable
         }
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="DeleteOneAsync(Expression{Func{T, bool}}, bool)" />
     public async Task DeleteOneAsync(Expression<Func<T, bool>> predicate, bool hardDelete = false)
     {
         ArgumentNullException.ThrowIfNull(predicate);
@@ -414,7 +424,7 @@ public class PostgresRepository<T> : IPostgresRepository<T>, IAsyncDisposable
         }
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="DeleteManyAsync(Expression{Func{T, bool}}, bool)" />
     public async Task<List<T>> DeleteManyAsync(
         Expression<Func<T, bool>> predicate,
         bool hardDelete = false)
@@ -449,6 +459,7 @@ public class PostgresRepository<T> : IPostgresRepository<T>, IAsyncDisposable
                     }
                 }
             });
+
             return entities;
         }
         catch
@@ -457,7 +468,7 @@ public class PostgresRepository<T> : IPostgresRepository<T>, IAsyncDisposable
         }
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="DeleteManyAsync(ICollection{T}, bool)" />
     public async Task DeleteManyAsync(ICollection<T> items, bool hardDelete = false)
     {
         ArgumentNullException.ThrowIfNull(items);
@@ -485,11 +496,11 @@ public class PostgresRepository<T> : IPostgresRepository<T>, IAsyncDisposable
         });
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="TruncateTableAsync(bool, bool)" />
     public Task TruncateTableAsync(bool restartIdentity = false, bool cascade = false) =>
         _sql.TruncateAsync(restartIdentity, cascade);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="RestoreAsync(string)" />
     public async Task RestoreAsync(string id)
     {
         var entity = await GetSingleOrDefaultAsync(item => item.Id == id && item.DeletedDateTime != null);
@@ -499,15 +510,16 @@ public class PostgresRepository<T> : IPostgresRepository<T>, IAsyncDisposable
         }
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="RestoreAsync(T)" />
     public Task RestoreAsync(T entity)
     {
         ArgumentNullException.ThrowIfNull(entity);
         entity.DeletedDateTime = null;
+
         return UpdateAsync(entity);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="DisposeAsync()" />
     public async ValueTask DisposeAsync()
     {
         if (_ownsConnection)
@@ -521,6 +533,7 @@ public class PostgresRepository<T> : IPostgresRepository<T>, IAsyncDisposable
     private static string ValidateConnectionString(string connectionString)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+
         return connectionString;
     }
 
@@ -551,108 +564,108 @@ public interface IPostgresRepository
 /// <typeparam name="T">Entity type.</typeparam>
 public interface IPostgresRepository<T> : IPostgresRepository where T : class, IPostgresEntity
 {
-    /// <inheritdoc />
+    /// <inheritdoc cref="CreateIndexAsync(Expression{Func{T, object}})" />
     Task CreateIndexAsync(Expression<Func<T, object>> field);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="CreateIndexAsync(Expression{Func{T, object}}, TimeSpan)" />
     Task CreateIndexAsync(Expression<Func<T, object>> field, TimeSpan expiresAfter);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="CreateIndexAsync(IEnumerable{Expression{Func{T, object}}}, Expression{Func{T, bool}}, bool)" />
     Task CreateIndexAsync(
         IEnumerable<Expression<Func<T, object>>> fields,
         Expression<Func<T, bool>>? filter = null,
         bool unique = false);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="CreateIndexAsync(IEnumerable{ValueTuple{Expression{Func{T, object}}, SortDirection}}, Expression{Func{T, bool}}, bool)" />
     Task CreateIndexAsync(
         IEnumerable<(Expression<Func<T, object>> PropertyExpression, SortDirection Direction)> fields,
         Expression<Func<T, bool>>? filter = null,
         bool unique = false);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="RemoveIndexAsync(Expression{Func{T, object}})" />
     Task RemoveIndexAsync(Expression<Func<T, object>> field);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="RemoveIndexAsync(IEnumerable{Expression{Func{T, object}}}, Expression{Func{T, bool}}, bool)" />
     Task RemoveIndexAsync(
         IEnumerable<Expression<Func<T, object>>> fields,
         Expression<Func<T, bool>>? filter = null,
         bool unique = false);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="InsertAsync(T)" />
     Task InsertAsync(T entity);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="InsertAsync(ICollection{T})" />
     Task InsertAsync(ICollection<T> entities);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="UpdateAsync(T)" />
     Task UpdateAsync(T entity);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="UpdateManyAsync(ICollection{T}, Dictionary{string, object})" />
     Task UpdateManyAsync(ICollection<T>? entities, Dictionary<string, object> updatedKeyValues);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="PullAsync{TItem}(Expression{Func{T, IEnumerable{TItem}}}, Expression{Func{TItem, bool}}, Expression{Func{T, bool}}, bool)" />
     Task PullAsync<TItem>(
         Expression<Func<T, IEnumerable<TItem>>> field,
         Expression<Func<TItem, bool>>? fieldFilter = null,
         Expression<Func<T, bool>>? documentPredicate = null,
         bool includeDeleted = false);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="DeleteByIdAsync(string, bool)" />
     Task DeleteByIdAsync(string id, bool hardDelete = false);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="DeleteAsync(T, bool)" />
     Task DeleteAsync(T entity, bool hardDelete = false);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="DeleteOneAsync(Expression{Func{T, bool}}, bool)" />
     Task DeleteOneAsync(Expression<Func<T, bool>> predicate, bool hardDelete = false);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="DeleteManyAsync(Expression{Func{T, bool}}, bool)" />
     Task<List<T>> DeleteManyAsync(Expression<Func<T, bool>> predicate, bool hardDelete = false);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="DeleteManyAsync(ICollection{T}, bool)" />
     Task DeleteManyAsync(ICollection<T> items, bool hardDelete = false);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="TruncateTableAsync(bool, bool)" />
     Task TruncateTableAsync(bool restartIdentity = false, bool cascade = false);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="RestoreAsync(T)" />
     Task RestoreAsync(T entity);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="RestoreAsync(string)" />
     Task RestoreAsync(string id);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="CountAsync(Expression{Func{T, bool}})" />
     Task<long> CountAsync(Expression<Func<T, bool>> predicate);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="ExistsAsync(Expression{Func{T, bool}})" />
     Task<bool> ExistsAsync(Expression<Func<T, bool>> predicate);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="TableExistsAsync()" />
     Task<bool> TableExistsAsync();
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="TableExistsAsync(string, string)" />
     Task<bool> TableExistsAsync(string tableName, string? schema = null);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="EnsureTableAsync()" />
     Task EnsureTableAsync();
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="GetByIdAsync(string)" />
     Task<T?> GetByIdAsync(string id);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="GetAllAsync(Expression{Func{T, bool}}, Expression{Func{T, object}}, SortDirection, bool)" />
     Task<List<T>> GetAllAsync(
         Expression<Func<T, bool>>? predicate = null,
         Expression<Func<T, object>>? orderBy = null,
         SortDirection sortDirection = SortDirection.Ascending,
         bool includeDeletes = false);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="GetAllAsync{TProjection}(Expression{Func{T, TProjection}}, Expression{Func{T, bool}}, bool)" />
     Task<List<TProjection>> GetAllAsync<TProjection>(
         Expression<Func<T, TProjection>> projection,
         Expression<Func<T, bool>>? predicate = null,
         bool includeDeletes = false);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="GetPagedListAsync(int, int, Expression{Func{T, bool}}, Expression{Func{T, object}}, SortDirection, bool)" />
     Task<IPagedList<T>> GetPagedListAsync(
         int pageIndex = 1,
         int pageSize = 50,
@@ -661,7 +674,7 @@ public interface IPostgresRepository<T> : IPostgresRepository where T : class, I
         SortDirection sortDirection = SortDirection.Ascending,
         bool includeDeletes = false);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="GetPagedListAsync(int, int, Expression{Func{T, bool}}, SortExpression{T}[], bool)" />
     Task<IPagedList<T>> GetPagedListAsync(
         int pageIndex,
         int pageSize,
@@ -669,13 +682,13 @@ public interface IPostgresRepository<T> : IPostgresRepository where T : class, I
         SortExpression<T>[] orderBy,
         bool includeDeletes = false);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="GetFirstOrDefaultAsync(Expression{Func{T, bool}}, Expression{Func{T, object}}, SortDirection, bool)" />
     Task<T?> GetFirstOrDefaultAsync(
         Expression<Func<T, bool>>? predicate = null,
         Expression<Func<T, object>>? orderBy = null,
         SortDirection sortDirection = SortDirection.Ascending,
         bool includeDeleted = false);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="GetSingleOrDefaultAsync(Expression{Func{T, bool}})" />
     Task<T?> GetSingleOrDefaultAsync(Expression<Func<T, bool>> predicate);
 }

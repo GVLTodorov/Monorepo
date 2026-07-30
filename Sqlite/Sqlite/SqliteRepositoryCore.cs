@@ -62,6 +62,7 @@ internal sealed class SqliteRepositoryCore<T> where T : class
     {
         ArgumentNullException.ThrowIfNull(expression);
         var body = StripConvert(expression.Body);
+
         return body is MemberExpression { Expression: ParameterExpression } member
             ? member.Member.Name
             : throw new ArgumentException("Expression must select an entity property.", nameof(expression));
@@ -104,6 +105,7 @@ internal sealed class SqliteRepositoryCore<T> where T : class
         }
 
         var indexName = $"idx_{_tableName}_{string.Join("_", fields)}";
+
         return ExecuteNonQueryAsync($"DROP INDEX IF EXISTS {QuoteIdentifier(indexName)};");
     }
 
@@ -180,6 +182,7 @@ internal sealed class SqliteRepositoryCore<T> where T : class
         var scalar = await ExecuteScalarAsync(
             $"SELECT COUNT(*) FROM {QuoteIdentifier(_tableName)}{where};",
             parameters);
+
         return Convert.ToInt64(scalar, CultureInfo.InvariantCulture);
     }
 
@@ -193,6 +196,7 @@ internal sealed class SqliteRepositoryCore<T> where T : class
         var scalar = await ExecuteScalarAsync(
             $"SELECT EXISTS(SELECT 1 FROM {QuoteIdentifier(_tableName)}{where});",
             parameters);
+
         return Convert.ToBoolean(scalar, CultureInfo.InvariantCulture);
     }
 
@@ -211,6 +215,7 @@ internal sealed class SqliteRepositoryCore<T> where T : class
             var value = await ExecuteScalarAsync(
                 sqliteSql,
                 [new SqlParameterValue("@name", tableName)]);
+
             return Convert.ToInt64(value, CultureInfo.InvariantCulture) == 1;
         }
 
@@ -234,6 +239,7 @@ internal sealed class SqliteRepositoryCore<T> where T : class
         }
 
         var scalar = await ExecuteScalarAsync(postgresSql, parameters);
+
         return Convert.ToBoolean(scalar, CultureInfo.InvariantCulture);
     }
 
@@ -336,6 +342,7 @@ internal sealed class SqliteRepositoryCore<T> where T : class
         {
             var suffix = (restartIdentity ? " RESTART IDENTITY" : "") + (cascade ? " CASCADE" : "");
             await ExecuteNonQueryAsync($"TRUNCATE TABLE {QuoteIdentifier(_tableName)}{suffix};");
+
             return;
         }
 
@@ -756,12 +763,14 @@ internal sealed class PredicateSqlTranslator<T>
     public string Translate(Expression<Func<T, bool>> expression)
     {
         ArgumentNullException.ThrowIfNull(expression);
+
         return Visit(expression.Body, expression.Parameters[0]);
     }
 
     private string Visit(Expression expression, ParameterExpression entityParameter)
     {
         expression = StripConvert(expression);
+
         return expression switch
         {
             BinaryExpression binary => VisitBinary(binary, entityParameter),
@@ -781,6 +790,7 @@ internal sealed class PredicateSqlTranslator<T>
         if (binary.NodeType is ExpressionType.AndAlso or ExpressionType.OrElse)
         {
             var logicalOperation = binary.NodeType == ExpressionType.AndAlso ? "AND" : "OR";
+
             return $"({Visit(binary.Left, entityParameter)}) {logicalOperation} ({Visit(binary.Right, entityParameter)})";
         }
 
@@ -792,6 +802,7 @@ internal sealed class PredicateSqlTranslator<T>
         if (leftColumn is null && rightColumn is null)
         {
             var result = Expression.Lambda<Func<bool>>(binary).Compile(preferInterpretation: true).Invoke();
+
             return result ? "1 = 1" : "1 = 0";
         }
 
@@ -846,6 +857,7 @@ internal sealed class PredicateSqlTranslator<T>
             call.Method.DeclaringType == typeof(string))
         {
             var value = Convert.ToString(Evaluate(call.Arguments[0], entityParameter), CultureInfo.InvariantCulture) ?? "";
+
             return call.Method.Name switch
             {
                 nameof(string.StartsWith) =>
@@ -894,6 +906,7 @@ internal sealed class PredicateSqlTranslator<T>
             var collection = Evaluate(collectionExpression, entityParameter) as IEnumerable
                 ?? throw new NotSupportedException("Contains collection could not be evaluated.");
             var placeholders = collection.Cast<object?>().Select(AddParameter).ToArray();
+
             return placeholders.Length == 0 ? "1 = 0" : $"{column} IN ({string.Join(", ", placeholders)})";
         }
 
@@ -932,6 +945,7 @@ internal sealed class PredicateSqlTranslator<T>
         }
 
         var converted = Expression.Convert(expression, typeof(object));
+
         return Expression.Lambda<Func<object?>>(converted).Compile(preferInterpretation: true).Invoke();
     }
 
@@ -939,6 +953,7 @@ internal sealed class PredicateSqlTranslator<T>
     {
         var name = $"@p{_parameterIndex++}";
         Parameters.Add(new SqlParameterValue(name, value));
+
         return name;
     }
 
@@ -946,6 +961,7 @@ internal sealed class PredicateSqlTranslator<T>
     {
         var finder = new ParameterFinder(parameter);
         finder.Visit(expression);
+
         return finder.Found;
     }
 

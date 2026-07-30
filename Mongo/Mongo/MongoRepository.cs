@@ -71,13 +71,13 @@ public class MongoRepository<T> : IMongoRepository<T> where T : class, IMongoEnt
 
     #region Indexes
 
-    /// <inheritdoc/>
+    /// <inheritdoc cref="CreateIndexAsync(Expression{Func{T, object}})" />
     public async Task CreateIndexAsync(Expression<Func<T, object>> field)
     {
         await Collection.Indexes.CreateOneAsync(new CreateIndexModel<T>(Builders<T>.IndexKeys.Ascending(field)!));
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc cref="CreateIndexAsync(Expression{Func{T, object}}, TimeSpan)" />
     public async Task CreateIndexAsync(Expression<Func<T, object>> field, TimeSpan expiresAfter)
     {
         await Collection.Indexes.CreateOneAsync(new CreateIndexModel<T>(Builders<T>.IndexKeys.Ascending(field)!, new CreateIndexOptions()
@@ -86,7 +86,7 @@ public class MongoRepository<T> : IMongoRepository<T> where T : class, IMongoEnt
         }));
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc cref="CreateIndexAsync(IEnumerable{Expression{Func{T, object}}}, Expression{Func{T, bool}}, bool)" />
     public async Task CreateIndexAsync(IEnumerable<Expression<Func<T, object>>> fields, Expression<Func<T, bool>>? filter = null, bool unique = false)
     {
         var fieldList = fields.ToList();
@@ -110,7 +110,7 @@ public class MongoRepository<T> : IMongoRepository<T> where T : class, IMongoEnt
         await Collection.Indexes.CreateOneAsync(new CreateIndexModel<T>(keys!, options));
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc cref="CreateIndexAsync(IEnumerable{ValueTuple{Expression{Func{T, object}}, SortDirection}}, Expression{Func{T, bool}}, bool)" />
     public async Task CreateIndexAsync(
         IEnumerable<(Expression<Func<T, object>> PropertyExpression, SortDirection Direction)> fields,
         Expression<Func<T, bool>>? filter = null,
@@ -143,7 +143,7 @@ public class MongoRepository<T> : IMongoRepository<T> where T : class, IMongoEnt
         await Collection.Indexes.CreateOneAsync(new CreateIndexModel<T>(keys, options));
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc cref="RemoveIndexAsync(Expression{Func{T, object}})" />
     public async Task RemoveIndexAsync(Expression<Func<T, object>> field)
     {
         var memberName = ExpressionHelper.GetMemberName(field);
@@ -168,7 +168,7 @@ public class MongoRepository<T> : IMongoRepository<T> where T : class, IMongoEnt
         await Collection.Indexes.DropOneAsync(index.ToString());
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc cref="RemoveIndexAsync(IEnumerable{Expression{Func{T, object}}}, Expression{Func{T, bool}}, bool)" />
     public async Task RemoveIndexAsync(IEnumerable<Expression<Func<T, object>>> fields, Expression<Func<T, bool>>? filter = null, bool unique = false)
     {
         var fieldList = fields.ToList();
@@ -205,7 +205,7 @@ public class MongoRepository<T> : IMongoRepository<T> where T : class, IMongoEnt
 
     #endregion
 
-    /// <inheritdoc/>
+    /// <inheritdoc cref="GetAllAsync{TProjection}(ProjectionDefinition{T, TProjection}, Expression{Func{T, bool}}, bool)" />
     public async Task<List<TProjection>> GetAllAsync<TProjection>(ProjectionDefinition<T, TProjection> projection,
         Expression<Func<T, bool>>? predicate = null, bool includeDeletes = false)
     {
@@ -223,7 +223,7 @@ public class MongoRepository<T> : IMongoRepository<T> where T : class, IMongoEnt
         return entityList;
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc cref="GetAllAsync(Expression{Func{T, bool}}, Expression{Func{T, object}}, SortDirection, bool)" />
     public async Task<List<T>> GetAllAsync(Expression<Func<T, bool>>? predicate = null, Expression<Func<T, object>>? orderBy = null, SortDirection sortDirection = SortDirection.Ascending, bool includeDeletes = false)
     {
         var orderByFilter = BuildOrderByOrDefault(orderBy);
@@ -245,7 +245,7 @@ public class MongoRepository<T> : IMongoRepository<T> where T : class, IMongoEnt
         return resultList;
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc cref="GetPagedListAsync(int, int, Expression{Func{T, bool}}, Expression{Func{T, object}}, SortDirection, bool)" />
     public Task<IPagedList<T>> GetPagedListAsync(
         int pageIndex = 1,
         int pageSize = 50,
@@ -258,11 +258,15 @@ public class MongoRepository<T> : IMongoRepository<T> where T : class, IMongoEnt
             pageIndex,
             pageSize,
             predicate,
-            [new() { Expression = BuildOrderByOrDefault(orderBy), SortDirection = sortDirection }],
+            [new()
+            {
+                Expression = BuildOrderByOrDefault(orderBy), 
+                SortDirection = sortDirection
+            }],
             includeDeletes);
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc cref="GetPagedListAsync(int, int, Expression{Func{T, bool}}, SortExpression{T}[], bool)" />
     public async Task<IPagedList<T>> GetPagedListAsync(
         int pageIndex,
         int pageSize,
@@ -304,10 +308,12 @@ public class MongoRepository<T> : IMongoRepository<T> where T : class, IMongoEnt
 
         Logger.LogDebug($"GetPagedList Count: {totalCount}");
 
-        return new PagedList<T>(result, pageIndex + 1, pageSize, totalPages, totalCount);
+        var pagedList = new PagedList<T>(result, pageIndex + 1, pageSize, totalPages, totalCount);
+
+        return pagedList;
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc cref="GetFirstOrDefaultAsync(Expression{Func{T, bool}}, Expression{Func{T, object}}, SortDirection, bool)" />
     public async Task<T?> GetFirstOrDefaultAsync(
         Expression<Func<T, bool>>? predicate = null,
         Expression<Func<T, object>>? orderBy = null, 
@@ -336,7 +342,7 @@ public class MongoRepository<T> : IMongoRepository<T> where T : class, IMongoEnt
         return entity;
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc cref="GetSingleOrDefaultAsync(Expression{Func{T, bool}})" />
     public async Task<T?> GetSingleOrDefaultAsync(Expression<Func<T, bool>> predicate)
     {
         var cursor = await Collection.FindAsync(BuildPredicateAsFilterDefinition(predicate));
@@ -345,7 +351,7 @@ public class MongoRepository<T> : IMongoRepository<T> where T : class, IMongoEnt
         return entity;
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc cref="GetByIdAsync(string)" />
     public async Task<T?> GetByIdAsync(string id)
     {
         var entity = await GetFirstOrDefaultAsync(p => p.Id == id);
@@ -353,7 +359,7 @@ public class MongoRepository<T> : IMongoRepository<T> where T : class, IMongoEnt
         return entity;
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc cref="InsertAsync(T)" />
     public async Task InsertAsync(T entity)
     {
 
@@ -364,7 +370,7 @@ public class MongoRepository<T> : IMongoRepository<T> where T : class, IMongoEnt
         Logger.LogDebug($"MongoDb Insert => Collection[{MongoEntityExtensions.GetCollectionName<T>()}]: {entity.Id}");
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc cref="InsertAsync(ICollection{T})" />
     public async Task InsertAsync(ICollection<T>? entities)
     {
         if (entities == null)
@@ -385,7 +391,7 @@ public class MongoRepository<T> : IMongoRepository<T> where T : class, IMongoEnt
         }
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc cref="UpdateAsync(T)" />
     public async Task UpdateAsync(T entity)
     {
         entity.UpdatedDateTime = DateTime.UtcNow;
@@ -395,11 +401,13 @@ public class MongoRepository<T> : IMongoRepository<T> where T : class, IMongoEnt
         Logger.LogDebug($"MongoDb Update => Collection [{MongoEntityExtensions.GetCollectionName<T>()}]: {entity.Id}");
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc cref="UpdateManyAsync(ICollection{T}, Dictionary{string, object})" />
     public async Task UpdateManyAsync(ICollection<T>? entities, Dictionary<string, object> updatedKeyValues)
     {
         if (entities?.Count == 0)
+        {
             return;
+        }
 
         using var session = await Client.StartSessionAsync(new ClientSessionOptions()
         {
@@ -468,45 +476,43 @@ public class MongoRepository<T> : IMongoRepository<T> where T : class, IMongoEnt
         }
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc cref="PullAsync(FieldDefinition{T}, object, ICollection{T}, Expression{Func{T, object}})" />
     public async Task PullAsync(FieldDefinition<T> field,
                                 object value,
                                 ICollection<T>? entitiesToBeUpdated = null,
                                 Expression<Func<T, object>>? fieldExistsFilter = null)
     {
-        try
+        var utcNow = DateTime.UtcNow;
+        var filter = Builders<T>.Filter.Empty;
+
+        if (fieldExistsFilter != null)
         {
-            var utcNow = DateTime.UtcNow;
-            var filter = Builders<T>.Filter.Empty;
-
-            if (fieldExistsFilter != null)
-            {
-                filter &= Builders<T>.Filter.Exists(fieldExistsFilter, true);
-            }
-
-            if (entitiesToBeUpdated != null)
-            {
-                filter &= Builders<T>.Filter.In(p => p.Id, entitiesToBeUpdated.Select(z => z.Id));
-            }
-
-            var updateBuilderList = new List<UpdateDefinition<T>>
-                {
-                    Builders<T>.Update
-                                .Set(entity => entity.UpdatedDateTime, utcNow)
-                                .Pull(field, value)
-                };
-
-
-            var updateBuilder = Builders<T>.Update.Combine(updateBuilderList);
-            var updateResult = await Collection.UpdateManyAsync(filter, updateBuilder);
+            filter &= Builders<T>.Filter.Exists(fieldExistsFilter, true);
         }
-        catch (Exception ex)
+
+        if (entitiesToBeUpdated != null)
         {
-            Logger.LogError(ex, "Error writing to MongoDB: {exception}", ex.Message);
+            filter &= Builders<T>.Filter.In(p => p.Id, entitiesToBeUpdated.Select(z => z.Id));
         }
+
+        var updateBuilderList = new List<UpdateDefinition<T>>
+            {
+                Builders<T>.Update
+                            .Set(entity => entity.UpdatedDateTime, utcNow)
+                            .Pull(field, value)
+            };
+
+
+        var updateBuilder = Builders<T>.Update.Combine(updateBuilderList);
+        var updateResult = await Collection.UpdateManyAsync(filter, updateBuilder);
+
+        Logger.LogInformation(
+            "MongoDb Pull => Collection[{Collection}]: Modified {ModifiedCount} document(s)",
+            MongoEntityExtensions.GetCollectionName<T>(),
+            updateResult.ModifiedCount);
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc cref="PullAsync{TItem}(Expression{Func{T, IEnumerable{TItem}}}, Expression{Func{TItem, bool}}, Expression{Func{T, bool}}, bool)" />
     public async Task PullAsync<TItem>(
         Expression<Func<T, IEnumerable<TItem>>> field,
         Expression<Func<TItem, bool>>? fieldFilter = null,
@@ -526,7 +532,7 @@ public class MongoRepository<T> : IMongoRepository<T> where T : class, IMongoEnt
         await Collection.UpdateManyAsync(predicateFilter, update);
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc cref="RestoreAsync(string)" />
     public async Task RestoreAsync(string id)
     {
         var entity = await Collection.FindOneAndUpdateAsync(
@@ -543,25 +549,25 @@ public class MongoRepository<T> : IMongoRepository<T> where T : class, IMongoEnt
         }
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc cref="RestoreAsync(T)" />
     public async Task RestoreAsync(T entity)
     {
         await RestoreAsync(entity.Id);
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc cref="DeleteByIdAsync(string, bool)" />
     public async Task DeleteByIdAsync(string id, bool hardDelete = false)
     {
         await DeleteOneAsync(x => x.Id == id, hardDelete);
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc cref="DeleteAsync(T, bool)" />
     public async Task DeleteAsync(T entity, bool hardDelete = false)
     {
         await DeleteOneAsync(x => x.Id == entity.Id, hardDelete);
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc cref="DeleteOneAsync(Expression{Func{T, bool}}, bool)" />
     public async Task DeleteOneAsync(Expression<Func<T, bool>> predicate, bool hardDelete = false)
     {
         if (!hardDelete)
@@ -590,7 +596,7 @@ public class MongoRepository<T> : IMongoRepository<T> where T : class, IMongoEnt
         }
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc cref="DeleteManyAsync(Expression{Func{T, bool}}, bool)" />
     public async Task<List<T>> DeleteManyAsync(Expression<Func<T, bool>> predicate, bool hardDelete = false)
     {
         if (hardDelete == false)
@@ -664,7 +670,7 @@ public class MongoRepository<T> : IMongoRepository<T> where T : class, IMongoEnt
         return [];
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc cref="DeleteManyAsync(ICollection{T}, bool)" />
     public async Task DeleteManyAsync(ICollection<T> items, bool hardDelete = false)
     {
         var identifiers = items.Select(x => x.Id);
@@ -672,7 +678,7 @@ public class MongoRepository<T> : IMongoRepository<T> where T : class, IMongoEnt
         await DeleteManyAsync(x => identifiers.Contains(x.Id), hardDelete);
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc cref="CountAsync(Expression{Func{T, bool}})" />
     public async Task<long> CountAsync(Expression<Func<T, bool>> predicate)
     {
         if (predicate == null)
@@ -685,7 +691,7 @@ public class MongoRepository<T> : IMongoRepository<T> where T : class, IMongoEnt
         return count;
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc cref="ExistsAsync(Expression{Func{T, bool}})" />
     public async Task<bool> ExistsAsync(Expression<Func<T, bool>> predicate)
     {
         if (predicate == null)
@@ -694,6 +700,7 @@ public class MongoRepository<T> : IMongoRepository<T> where T : class, IMongoEnt
         }
 
         var entity = await GetFirstOrDefaultAsync(predicate);
+
         return entity != null;
     }
 
@@ -881,103 +888,103 @@ public interface IMongoRepository
 /// <typeparam name="T">Entity type.</typeparam>
 public interface IMongoRepository<T> : IMongoRepository where T : class, IMongoEntity
 {
-    /// <inheritdoc />
+    /// <inheritdoc cref="CreateIndexAsync(Expression{Func{T, object}})" />
     Task CreateIndexAsync(Expression<Func<T, object>> field);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="CreateIndexAsync(Expression{Func{T, object}}, TimeSpan)" />
     Task CreateIndexAsync(Expression<Func<T, object>> field, TimeSpan expiresAfter);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="CreateIndexAsync(IEnumerable{Expression{Func{T, object}}}, Expression{Func{T, bool}}, bool)" />
     Task CreateIndexAsync(
         IEnumerable<Expression<Func<T, object>>> fields,
         Expression<Func<T, bool>>? filter = null,
         bool unique = false);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="CreateIndexAsync(IEnumerable{ValueTuple{Expression{Func{T, object}}, SortDirection}}, Expression{Func{T, bool}}, bool)" />
     Task CreateIndexAsync(
         IEnumerable<(Expression<Func<T, object>> PropertyExpression, SortDirection Direction)> fields,
         Expression<Func<T, bool>>? filter = null,
         bool unique = false);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="RemoveIndexAsync(Expression{Func{T, object}})" />
     Task RemoveIndexAsync(Expression<Func<T, object>> field);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="RemoveIndexAsync(IEnumerable{Expression{Func{T, object}}}, Expression{Func{T, bool}}, bool)" />
     Task RemoveIndexAsync(
         IEnumerable<Expression<Func<T, object>>> fields,
         Expression<Func<T, bool>>? filter = null,
         bool unique = false);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="InsertAsync(T)" />
     Task InsertAsync(T entity);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="InsertAsync(ICollection{T})" />
     Task InsertAsync(ICollection<T> entities);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="UpdateAsync(T)" />
     Task UpdateAsync(T entity);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="UpdateManyAsync(ICollection{T}, Dictionary{string, object})" />
     Task UpdateManyAsync(ICollection<T>? entities, Dictionary<string, object> updatedKeyValues);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="PullAsync(FieldDefinition{T}, object, ICollection{T}, Expression{Func{T, object}})" />
     Task PullAsync(
         FieldDefinition<T> field,
         object value,
         ICollection<T>? entitiesToBeUpdated = null,
         Expression<Func<T, object>>? fieldExistsFilter = null);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="PullAsync{TItem}(Expression{Func{T, IEnumerable{TItem}}}, Expression{Func{TItem, bool}}, Expression{Func{T, bool}}, bool)" />
     Task PullAsync<TItem>(
         Expression<Func<T, IEnumerable<TItem>>> field,
         Expression<Func<TItem, bool>>? fieldFilter = null,
         Expression<Func<T, bool>>? documentPredicate = null,
         bool includeDeleted = false);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="DeleteByIdAsync(string, bool)" />
     Task DeleteByIdAsync(string id, bool hardDelete = false);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="DeleteAsync(T, bool)" />
     Task DeleteAsync(T entity, bool hardDelete = false);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="DeleteOneAsync(Expression{Func{T, bool}}, bool)" />
     Task DeleteOneAsync(Expression<Func<T, bool>> predicate, bool hardDelete = false);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="DeleteManyAsync(Expression{Func{T, bool}}, bool)" />
     Task<List<T>> DeleteManyAsync(Expression<Func<T, bool>> predicate, bool hardDelete = false);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="DeleteManyAsync(ICollection{T}, bool)" />
     Task DeleteManyAsync(ICollection<T> items, bool hardDelete = false);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="RestoreAsync(T)" />
     Task RestoreAsync(T entity);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="RestoreAsync(string)" />
     Task RestoreAsync(string id);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="CountAsync(Expression{Func{T, bool}})" />
     Task<long> CountAsync(Expression<Func<T, bool>> predicate);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="ExistsAsync(Expression{Func{T, bool}})" />
     Task<bool> ExistsAsync(Expression<Func<T, bool>> predicate);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="GetByIdAsync(string)" />
     Task<T?> GetByIdAsync(string id);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="GetAllAsync(Expression{Func{T, bool}}, Expression{Func{T, object}}, SortDirection, bool)" />
     Task<List<T>> GetAllAsync(
         Expression<Func<T, bool>>? predicate = null,
         Expression<Func<T, object>>? orderBy = null,
         SortDirection sortDirection = SortDirection.Ascending,
         bool includeDeletes = false);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="GetAllAsync{TProjection}(ProjectionDefinition{T, TProjection}, Expression{Func{T, bool}}, bool)" />
     Task<List<TProjection>> GetAllAsync<TProjection>(
         ProjectionDefinition<T, TProjection> projection,
         Expression<Func<T, bool>>? predicate = null,
         bool includeDeletes = false);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="GetPagedListAsync(int, int, Expression{Func{T, bool}}, Expression{Func{T, object}}, SortDirection, bool)" />
     Task<IPagedList<T>> GetPagedListAsync(
         int pageIndex = 1,
         int pageSize = 50,
@@ -986,7 +993,7 @@ public interface IMongoRepository<T> : IMongoRepository where T : class, IMongoE
         SortDirection sortDirection = SortDirection.Ascending,
         bool includeDeletes = false);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="GetPagedListAsync(int, int, Expression{Func{T, bool}}, SortExpression{T}[], bool)" />
     Task<IPagedList<T>> GetPagedListAsync(
         int pageIndex,
         int pageSize,
@@ -994,13 +1001,13 @@ public interface IMongoRepository<T> : IMongoRepository where T : class, IMongoE
         SortExpression<T>[] orderBy,
         bool includeDeletes = false);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="GetFirstOrDefaultAsync(Expression{Func{T, bool}}, Expression{Func{T, object}}, SortDirection, bool)" />
     Task<T?> GetFirstOrDefaultAsync(
         Expression<Func<T, bool>>? predicate = null,
         Expression<Func<T, object>>? orderBy = null,
         SortDirection sortDirection = SortDirection.Ascending,
         bool includeDeleted = false);
 
-    /// <inheritdoc />
+    /// <inheritdoc cref="GetSingleOrDefaultAsync(Expression{Func{T, bool}})" />
     Task<T?> GetSingleOrDefaultAsync(Expression<Func<T, bool>> predicate);
 }

@@ -45,7 +45,9 @@ internal sealed class TestDatabase : IAsyncDisposable
             await repository.EnsureTableAsync();
         }
 
-        return new TestDatabase(connection, repository);
+        var testDatabase = new TestDatabase(connection, repository);
+
+        return testDatabase;
     }
 
     public async ValueTask DisposeAsync()
@@ -284,6 +286,7 @@ public sealed class SqliteRepositoryTests
             Create("beta", "Beta", 30, "x", null, "two", "common"),
             Create("delta", "Delta", 40, "y", null, "three")
         });
+
         return database;
     }
 
