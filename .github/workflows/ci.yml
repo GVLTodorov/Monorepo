@@ -19,12 +19,14 @@ jobs:
     name: Build and test
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: write
 
     steps:
       - name: Check out source
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          persist-credentials: false
+          persist-credentials: true
 
       - name: Set up .NET 10
         uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5.2.0
@@ -38,7 +40,40 @@ jobs:
         run: dotnet build Monorepo.sln --configuration Release --no-restore -p:ContinuousIntegrationBuild=true
 
       - name: Test
-        run: dotnet test Monorepo.sln --configuration Release --no-build --nologo --verbosity minimal -p:ContinuousIntegrationBuild=true
+        run: >-
+          dotnet test Monorepo.sln
+          --configuration Release
+          --no-build
+          --nologo
+          --verbosity minimal
+          -p:ContinuousIntegrationBuild=true
+          --collect:"XPlat Code Coverage"
+          --logger trx
+          --results-directory ./TestResults
+
+      - name: Install ReportGenerator
+        run: dotnet tool install --global dotnet-reportgenerator-globaltool --version 5.5.11
+
+      - name: Generate coverage summary
+        run: reportgenerator -reports:"./TestResults/*/coverage.cobertura.xml" -targetdir:"./CoverageReport" -reporttypes:"JsonSummary"
+
+      - name: Update README coverage table
+        shell: pwsh
+        run: ./.github/scripts/Update-ReadmeCoverage.ps1
+
+      - name: Commit README coverage update
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          if ! git diff --quiet -- README.md; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add README.md
+            git commit -m "docs: update test coverage numbers [skip ci]"
+            git push origin HEAD:${{ github.ref_name }}
+          else
+            echo "No coverage changes to commit."
+          fi
 
   benchmarks:
     name: Run benchmarks
