@@ -54,26 +54,31 @@ jobs:
       - name: Install ReportGenerator
         run: dotnet tool install --global dotnet-reportgenerator-globaltool --version 5.5.11
 
-      - name: Generate coverage summary
-        run: reportgenerator -reports:"./TestResults/*/coverage.cobertura.xml" -targetdir:"./CoverageReport" -reporttypes:"JsonSummary"
+      - name: Generate coverage report
+        run: reportgenerator -reports:"./TestResults/*/coverage.cobertura.xml" -targetdir:"./CoverageReport" -reporttypes:"Html;MarkdownSummaryGithub;Badges"
 
-      - name: Update README coverage table
-        shell: pwsh
-        run: ./.github/scripts/Update-ReadmeCoverage.ps1
+      - name: Add coverage summary to job summary
+        run: cat ./CoverageReport/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Commit README coverage update
+      - name: Upload coverage report artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-report
+          path: ./CoverageReport/
+
+      - name: Update coverage badges
         if: github.event_name == 'push'
-        shell: bash
         run: |
-          if ! git diff --quiet -- README.md; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add README.md
-            git commit -m "docs: update test coverage numbers [skip ci]"
-            git push origin HEAD:${{ github.ref_name }}
-          else
-            echo "No coverage changes to commit."
-          fi
+          mkdir -p badges
+          cp ./CoverageReport/badge_linecoverage.svg badges/line_coverage.svg
+          cp ./CoverageReport/badge_branchcoverage.svg badges/branch_coverage.svg
+
+      - name: Commit updated badges
+        if: github.event_name == 'push'
+        uses: stefanzweifel/git-auto-commit-action@4a55954c782fc1ea30b9056cd3e7a2b40ca8887d # v7.2.0
+        with:
+          commit_message: "chore: update coverage badges [skip ci]"
+          file_pattern: "badges/*.svg"
 
   benchmarks:
     name: Run benchmarks
