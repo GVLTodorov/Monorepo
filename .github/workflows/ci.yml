@@ -69,16 +69,16 @@ jobs:
       - name: Update coverage badges
         if: github.event_name == 'push'
         run: |
-          mkdir -p badges
-          cp ./CoverageReport/badge_linecoverage.svg badges/line_coverage.svg
-          cp ./CoverageReport/badge_branchcoverage.svg badges/branch_coverage.svg
+          mkdir -p .github/badges
+          cp ./CoverageReport/badge_linecoverage.svg .github/badges/line_coverage.svg
+          cp ./CoverageReport/badge_branchcoverage.svg .github/badges/branch_coverage.svg
 
       - name: Commit updated badges
         if: github.event_name == 'push'
         uses: stefanzweifel/git-auto-commit-action@4a55954c782fc1ea30b9056cd3e7a2b40ca8887d # v7.2.0
         with:
           commit_message: "chore: update coverage badges [skip ci]"
-          file_pattern: "badges/*.svg"
+          file_pattern: ".github/badges/*.svg"
 
   benchmarks:
     name: Run benchmarks

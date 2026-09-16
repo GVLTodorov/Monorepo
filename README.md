@@ -1,8 +1,8 @@
 # Devspace data repositories
 
 [![CI](https://github.com/GVLTodorov/Monorepo/actions/workflows/ci.yml/badge.svg)](https://github.com/GVLTodorov/Monorepo/actions/workflows/ci.yml)
-![Line coverage](badges/line_coverage.svg)
-![Branch coverage](badges/branch_coverage.svg)
+![Line coverage](.github/badges/line_coverage.svg)
+![Branch coverage](.github/badges/branch_coverage.svg)
 
 Production-oriented repository abstractions for MongoDB, PostgreSQL, and SQLite on .NET 10.
 
